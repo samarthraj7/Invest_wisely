@@ -1,0 +1,20 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.17
+pydantic==2.9.2
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+SQLAlchemy==2.0.36
+
+# Deck parsing
+PyMuPDF==1.24.13
+python-pptx==1.0.2
+
+# Clients
+anthropic==0.39.0
+exa-py==1.7.1
+requests==2.32.3
+
+# Report export
+jinja2==3.1.4
+weasyprint==63.1

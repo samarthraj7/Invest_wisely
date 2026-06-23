@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-ink-50 text-ink-800 antialiased;
+  background-image:
+    radial-gradient(60rem 60rem at 110% -10%, rgba(91, 124, 250, 0.08), transparent 60%),
+    radial-gradient(50rem 50rem at -10% 10%, rgba(67, 97, 238, 0.06), transparent 55%);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-ink-100 bg-white shadow-soft;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white hover:bg-brand-700 active:scale-[.98];
+  }
+  .btn-ghost {
+    @apply btn border border-ink-100 bg-white text-ink-800 hover:bg-ink-50;
+  }
+  .section-title {
+    @apply flex items-center gap-3 text-lg font-semibold text-ink-900;
+  }
+}
+
+/* subtle scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { @apply rounded-full bg-ink-100; }
