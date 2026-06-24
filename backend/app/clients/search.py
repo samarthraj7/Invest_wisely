@@ -8,6 +8,10 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import get_settings
+from ._resilience import RateLimiter, with_retry
+
+# Exa allows generous throughput; keep a small floor to avoid bursts.
+_LIMITER = RateLimiter(min_interval_s=0.25)
 
 
 class SearchClient:
@@ -29,7 +33,8 @@ class SearchClient:
     def search(self, query: str, num_results: int = 5) -> list[dict[str, Any]]:
         if not self.live:
             return _mock_results(query, num_results)
-        try:
+
+        def _call() -> list[dict[str, Any]]:
             res = self._client.search_and_contents(  # type: ignore[union-attr]
                 query, num_results=num_results, text={"max_characters": 800}
             )
@@ -43,7 +48,11 @@ class SearchClient:
                     }
                 )
             return out
+
+        try:
+            return with_retry(_call, retries=3, rate_limiter=_LIMITER)
         except Exception:
+            # Exhausted retries (rate limit / outage) -> degrade, don't crash the run.
             return _mock_results(query, num_results)
 
 

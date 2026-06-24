@@ -83,6 +83,7 @@ export interface InvestmentReport {
   valuation: Valuation;
   recommendation: Recommendation;
   analyst_note: string;
+  warnings: string[];
   mock_mode: boolean;
 }
 

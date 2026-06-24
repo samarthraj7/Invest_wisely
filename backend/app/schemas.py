@@ -132,4 +132,8 @@ class InvestmentReport(BaseModel):
     analyst_note: str = Field(
         default="Directional analyst support. Augments, not replaces, partner judgment.",
     )
+    warnings: List[str] = Field(
+        default_factory=list,
+        description="Non-fatal data-quality / pipeline notes (e.g. image-only deck, research degraded).",
+    )
     mock_mode: bool = False

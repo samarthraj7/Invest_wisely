@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { exportUrl, getDeck } from "@/lib/api";
+import type { ExportFormat } from "@/lib/api";
 import type { DeckDetail } from "@/lib/types";
 import { ClaimRow, ConfidenceBadge, Section, SEV_STYLE, SourceTag } from "@/components/ui";
 
@@ -51,14 +52,39 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <Link href="/" className="text-sm text-ink-400 hover:text-ink-800">
           ← Deal flow
         </Link>
-        <a href={exportUrl(deck.id)} target="_blank" rel="noreferrer" className="btn-ghost">
-          Export memo
-        </a>
+        <div className="flex items-center gap-2">
+          <span className="mr-1 text-xs font-medium text-ink-400">Export</span>
+          {(["pdf", "docx", "html"] as ExportFormat[]).map((f) => (
+            <a
+              key={f}
+              href={exportUrl(deck.id, f)}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-ghost px-3 py-2 text-xs uppercase"
+            >
+              {f}
+            </a>
+          ))}
+          <button onClick={() => window.print()} className="btn-primary px-3 py-2 text-xs">
+            Print
+          </button>
+        </div>
       </div>
+
+      {r.warnings.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 print:hidden">
+          <p className="mb-1 font-semibold">Data-quality notes</p>
+          <ul className="list-disc space-y-0.5 pl-5">
+            {r.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Hero */}
       <div className="card overflow-hidden">
@@ -113,7 +139,12 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                 <p className="font-semibold text-ink-900">{m.name}</p>
                 <p className="text-xs text-ink-400">{m.title}</p>
               </div>
-              <ConfidenceBadge c={m.research_confidence} />
+              <div className="flex items-center gap-2">
+                {m.research_confidence === "inconclusive" && (
+                  <span className="chip bg-orange-50 text-orange-700">not found online</span>
+                )}
+                <ConfidenceBadge c={m.research_confidence} />
+              </div>
             </div>
             <div className="mt-3 space-y-2">
               {m.researched_background.map((c, k) => (

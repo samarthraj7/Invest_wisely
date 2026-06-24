@@ -38,6 +38,10 @@ _TEMPLATE = Template(
 <div class="muted">{{ r.company_snapshot.sector or '' }} · {{ r.company_snapshot.stage or '' }}
  · {{ r.company_snapshot.location or '' }} · Ask: {{ r.company_snapshot.ask or 'n/a' }}</div>
 {% if r.mock_mode %}<p><span class="pill" style="background:#fef9c3;color:#854d0e">MOCK MODE — add API keys for live research</span></p>{% endif %}
+{% if r.warnings %}<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-top:10px">
+<b style="color:#854d0e;font-size:13px">Data-quality notes</b>
+<ul style="margin:6px 0 0;padding-left:18px;font-size:13px;color:#92400e">
+{% for w in r.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>{% endif %}
 
 <h2>1 · Company snapshot</h2>
 {% for c in r.company_snapshot.deck_claims %}{{ claim(c) }}{% endfor %}
@@ -107,17 +111,126 @@ def render_html(report: InvestmentReport) -> str:
     )
 
 
-def export_pdf(report: InvestmentReport, out_path: str | Path) -> tuple[Path, str]:
-    """Write the report to disk. Returns (path, format) where format is 'pdf' or 'html'."""
-    out_path = Path(out_path)
-    html = render_html(report)
+def _export_html(report: InvestmentReport, out_path: Path) -> tuple[Path, str]:
+    html_path = out_path.with_suffix(".html")
+    html_path.write_text(render_html(report), encoding="utf-8")
+    return html_path, "html"
+
+
+def _export_pdf(report: InvestmentReport, out_path: Path) -> tuple[Path, str]:
+    """Render a PDF via WeasyPrint; fall back to HTML if native deps are absent."""
     try:
         from weasyprint import HTML
 
         pdf_path = out_path.with_suffix(".pdf")
-        HTML(string=html).write_pdf(str(pdf_path))
+        HTML(string=render_html(report)).write_pdf(str(pdf_path))
         return pdf_path, "pdf"
     except Exception:
-        html_path = out_path.with_suffix(".html")
-        html_path.write_text(html, encoding="utf-8")
-        return html_path, "html"
+        return _export_html(report, out_path)
+
+
+def _export_docx(report: InvestmentReport, out_path: Path) -> tuple[Path, str]:
+    """Build a .docx memo (cross-platform, no native deps). Falls back to HTML."""
+    try:
+        from docx import Document
+        from docx.shared import Pt, RGBColor
+    except Exception:
+        return _export_html(report, out_path)
+
+    r = report
+    s = r.company_snapshot
+    doc = Document()
+    doc.add_heading(s.name, level=0)
+    doc.add_paragraph(s.one_liner)
+    meta = " · ".join(x for x in [s.sector, s.stage, s.location] if x)
+    if meta:
+        doc.add_paragraph(meta)
+    if s.ask:
+        doc.add_paragraph(f"Ask: {s.ask}")
+    if r.mock_mode:
+        doc.add_paragraph("MOCK MODE — add API keys for live research.")
+    for w in r.warnings:
+        doc.add_paragraph(f"Note: {w}")
+
+    def claim_p(c) -> None:
+        p = doc.add_paragraph(style="List Bullet")
+        p.add_run(c.claim)
+        sub = doc.add_paragraph()
+        run = sub.add_run(f"    {c.source_type.value}: {c.source_ref}  ({c.confidence.value})")
+        run.italic = True
+        run.font.size = Pt(8)
+        run.font.color.rgb = RGBColor(0x64, 0x74, 0x8B)
+
+    doc.add_heading("1 · Company snapshot", level=1)
+    for c in s.deck_claims:
+        claim_p(c)
+
+    doc.add_heading("2 · Team analysis", level=1)
+    for m in r.team_analysis:
+        doc.add_heading(f"{m.name} — {m.title or ''}  (research: {m.research_confidence.value})", level=2)
+        for c in m.researched_background + m.gaps_vs_venture:
+            claim_p(c)
+
+    doc.add_heading("3 · Competitive landscape", level=1)
+    for c in r.competitive_landscape.named_in_deck + r.competitive_landscape.discovered:
+        doc.add_paragraph(f"{c.name} ({c.relationship})")
+        claim_p(c.note)
+    for c in r.competitive_landscape.differentiation_assessment:
+        claim_p(c)
+
+    doc.add_heading("4 · Red flags", level=1)
+    for f in r.red_flags:
+        doc.add_paragraph(f"[{f.severity.value.upper()}] {f.title}")
+        claim_p(f.reasoning)
+
+    doc.add_heading("5 · Suggested diligence questions", level=1)
+    for q in r.diligence_questions:
+        doc.add_paragraph(f"{q.question}  (→ {q.targets_gap})", style="List Number")
+
+    doc.add_heading("6 · Valuation analysis", level=1)
+    doc.add_paragraph(
+        f"Comp-derived range: {r.valuation.range_low} – {r.valuation.range_high}  |  "
+        f"Deck ask: {r.valuation.deck_ask}  |  Multiples: {r.valuation.multiples_used}"
+    )
+    for c in r.valuation.comps:
+        doc.add_paragraph(f"{c.company}: {c.detail}  [{c.source.source_ref}]", style="List Bullet")
+    for a in r.valuation.assumptions:
+        doc.add_paragraph(f"Assumption: {a}", style="List Bullet")
+    for c in r.valuation.ask_vs_comps:
+        claim_p(c)
+
+    doc.add_heading("7 · Recommendation", level=1)
+    rec = r.recommendation
+    doc.add_paragraph(f"{rec.recommendation.value.upper()}  ·  Risk: {rec.risk_rating}")
+    if rec.suggested_check_size:
+        doc.add_paragraph(f"Suggested check: {rec.suggested_check_size}")
+    doc.add_paragraph(rec.rationale)
+    for c in rec.risk_factors:
+        claim_p(c)
+
+    doc.add_paragraph(r.analyst_note)
+
+    docx_path = out_path.with_suffix(".docx")
+    doc.save(str(docx_path))
+    return docx_path, "docx"
+
+
+def export_report(
+    report: InvestmentReport, out_path: str | Path, fmt: str = "pdf"
+) -> tuple[Path, str]:
+    """Export to 'pdf' | 'docx' | 'html'. Returns (path, actual_format).
+
+    PDF/DOCX gracefully fall back to HTML when their dependencies are missing.
+    """
+    out_path = Path(out_path)
+    fmt = (fmt or "pdf").lower()
+    if fmt == "html":
+        return _export_html(report, out_path)
+    if fmt == "docx":
+        return _export_docx(report, out_path)
+    return _export_pdf(report, out_path)
+
+
+# Backwards-compatible alias (used by the CLI).
+def export_pdf(report: InvestmentReport, out_path: str | Path) -> tuple[Path, str]:
+    return export_report(report, out_path, "pdf")

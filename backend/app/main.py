@@ -82,14 +82,27 @@ def _create_and_run(filename: str, src_path: Path, bg: BackgroundTasks) -> dict:
     return {"id": deck_id, "status": "pending"}
 
 
+MAX_UPLOAD_BYTES = 30 * 1024 * 1024  # 30 MB
+
+
 @app.post("/api/decks")
 async def upload_deck(bg: BackgroundTasks, file: UploadFile = File(...)) -> dict:
     if not file.filename or not file.filename.lower().endswith((".pdf", ".pptx", ".ppt")):
         raise HTTPException(400, "Upload a .pdf or .pptx file")
     deck_id = str(uuid.uuid4())
     dest = UPLOAD_DIR / f"{deck_id}_{file.filename}"
+    size = 0
     with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                f.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(413, "Deck too large (max 30 MB).")
+            f.write(chunk)
+    if size == 0:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(400, "Uploaded file is empty.")
     return _create_and_run(file.filename, dest, bg)
 
 
@@ -136,14 +149,26 @@ def get_deck(deck_id: str) -> dict:
         }
 
 
+_MEDIA = {
+    "pdf": "application/pdf",
+    "html": "text/html",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
 @app.get("/api/decks/{deck_id}/export")
-def export_deck(deck_id: str) -> FileResponse:
+def export_deck(deck_id: str, format: str = "pdf") -> FileResponse:
+    fmt = format.lower()
+    if fmt not in _MEDIA:
+        raise HTTPException(400, "format must be one of: pdf, docx, html")
     with SessionLocal() as s:
         d = s.get(Deck, deck_id)
         if not d or not d.report_json:
             raise HTTPException(404, "Report not ready")
         report = InvestmentReport.model_validate(d.report_json)
+        company = d.company_name
     out = REPORT_DIR / f"{deck_id}"
-    path, fmt = report_mod.export_pdf(report, out)
-    media = "application/pdf" if fmt == "pdf" else "text/html"
-    return FileResponse(str(path), media_type=media, filename=f"{d.company_name}_memo.{fmt}")
+    path, actual = report_mod.export_report(report, out, fmt)
+    return FileResponse(
+        str(path), media_type=_MEDIA[actual], filename=f"{company}_memo.{actual}"
+    )

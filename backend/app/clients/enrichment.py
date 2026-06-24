@@ -10,9 +10,20 @@ from typing import Any, Optional
 import requests
 
 from ..config import get_settings
+from ._resilience import RateLimited, RateLimiter, with_retry
 
 _PROFILE_ENDPOINT = "https://nubela.co/proxycurl/api/v2/linkedin"
 _RESOLVE_ENDPOINT = "https://nubela.co/proxycurl/api/linkedin/profile/resolve"
+
+# Proxycurl is rate-sensitive; keep at most ~2 req/s.
+_LIMITER = RateLimiter(min_interval_s=0.5)
+
+
+def _get(url: str, headers: dict[str, str], params: dict[str, Any]) -> requests.Response:
+    resp = requests.get(url, headers=headers, params=params, timeout=30)
+    if resp.status_code == 429 or resp.status_code >= 500:
+        raise RateLimited(f"Proxycurl {resp.status_code}")
+    return resp
 
 
 class EnrichmentClient:
@@ -34,28 +45,29 @@ class EnrichmentClient:
     ) -> dict[str, Any]:
         if not self.live:
             return _mock_profile(name, company)
+        not_found = {"found": False, "name": name, "source_url": linkedin_url, "raw": {}}
         try:
             url = linkedin_url
             if not url:
-                resolved = requests.get(
-                    _RESOLVE_ENDPOINT,
-                    headers=self._headers(),
-                    params={"first_name": name.split()[0], "company_domain": company or ""},
-                    timeout=30,
+                resolved = with_retry(
+                    lambda: _get(
+                        _RESOLVE_ENDPOINT,
+                        self._headers(),
+                        {"first_name": name.split()[0], "company_domain": company or ""},
+                    ),
+                    rate_limiter=_LIMITER,
                 )
                 if resolved.ok:
                     url = resolved.json().get("url")
             if not url:
-                return {"found": False, "name": name, "source_url": None, "raw": {}}
+                return {**not_found, "source_url": None}
 
-            prof = requests.get(
-                _PROFILE_ENDPOINT,
-                headers=self._headers(),
-                params={"url": url},
-                timeout=30,
+            prof = with_retry(
+                lambda: _get(_PROFILE_ENDPOINT, self._headers(), {"url": url}),
+                rate_limiter=_LIMITER,
             )
             if not prof.ok:
-                return {"found": False, "name": name, "source_url": url, "raw": {}}
+                return {**not_found, "source_url": url}
             data = prof.json()
             return {
                 "found": True,
@@ -67,7 +79,7 @@ class EnrichmentClient:
                 "raw": data,
             }
         except Exception:
-            return {"found": False, "name": name, "source_url": linkedin_url, "raw": {}}
+            return not_found
 
 
 def _mock_profile(name: str, company: Optional[str]) -> dict[str, Any]:

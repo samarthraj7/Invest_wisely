@@ -26,8 +26,10 @@ export async function runDemo(): Promise<{ id: string }> {
   return j(await fetch(`${API_BASE}/api/decks/demo`, { method: "POST" }));
 }
 
-export function exportUrl(id: string): string {
-  return `${API_BASE}/api/decks/${id}/export`;
+export type ExportFormat = "pdf" | "docx" | "html";
+
+export function exportUrl(id: string, format: ExportFormat = "pdf"): string {
+  return `${API_BASE}/api/decks/${id}/export?format=${format}`;
 }
 
 export async function health(): Promise<{
