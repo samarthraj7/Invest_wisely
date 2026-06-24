@@ -18,4 +18,9 @@ requests==2.32.3
 # Report export
 jinja2==3.1.4
 python-docx==1.1.2
-weasyprint==63.1  # optional: PDF export; needs native GTK libs. HTML/DOCX work without it.
+
+# Optional: native PDF export. WeasyPrint needs system GTK/Pango/Cairo libs and
+# has no Windows wheel, so it's NOT installed by default. HTML + DOCX export and
+# browser "Print -> Save as PDF" work without it. To enable server-side PDF:
+#   pip install -r requirements-optional.txt
+# (see requirements-optional.txt)

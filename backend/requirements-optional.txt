@@ -1,0 +1,8 @@
+# Optional dependencies — install only if you want native server-side PDF export.
+#   pip install -r requirements-optional.txt
+#
+# WeasyPrint requires system libraries (GTK / Pango / Cairo). On Windows it has
+# no binary wheel; install the GTK runtime first, or skip this and use DOCX /
+# the browser's "Print -> Save as PDF". On macOS:  brew install pango
+# On Debian/Ubuntu:  apt-get install libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0
+weasyprint==63.1
