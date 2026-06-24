@@ -54,6 +54,13 @@ def run_pipeline(deck_path: str | Path, on_stage: StageCb = None) -> PipelineRes
 
     stage("analyzing")
     report = analysis.analyze(ents, understanding, research_bundle)
+
+    # If a live LLM call failed mid-run, surface why (billing, etc.) at the top.
+    from ..clients.llm import get_llm
+
+    llm = get_llm()
+    if llm.degraded and llm.last_error:
+        warnings.insert(0, f"Live analysis unavailable - showing sample analysis. Reason: {llm.last_error}")
     report.warnings = warnings
 
     stage("done")

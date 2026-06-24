@@ -20,11 +20,15 @@ _SLIDES = [
 
 
 def generate_demo_deck(out_dir: str | Path) -> Path:
+    import uuid
+
     import fitz  # PyMuPDF
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / "demo_nimbusgrid_deck.pdf"
+    # Unique filename per call so concurrent/repeat demo runs never collide on a
+    # locked file (Windows raises "Permission denied" when overwriting in use).
+    path = out_dir / f"demo_nimbusgrid_{uuid.uuid4().hex[:8]}.pdf"
 
     doc = fitz.open()
     for title, body in _SLIDES:

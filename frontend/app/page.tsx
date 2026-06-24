@@ -1,29 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { health, listDecks, runDemo, uploadDeck } from "@/lib/api";
 import type { DeckListItem } from "@/lib/types";
+import { Banner, recMeta } from "@/components/ui";
 
-const REC_STYLE: Record<string, string> = {
-  invest: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  pass: "bg-red-50 text-red-700 border-red-200",
-  more_diligence: "bg-amber-50 text-amber-700 border-amber-200",
-};
-
-const STATUS_LABEL: Record<string, string> = {
+const STAGES = ["pending", "parsing", "understanding", "extracting", "researching", "analyzing"];
+const STAGE_LABEL: Record<string, string> = {
   pending: "Queued",
   parsing: "Parsing deck",
   understanding: "Reading deck",
   extracting: "Extracting team",
-  researching: "Researching",
-  analyzing: "Analyzing",
-  done: "Done",
-  error: "Error",
+  researching: "Researching web",
+  analyzing: "Writing memo",
 };
 
-function recLabel(r: string) {
-  return r === "more_diligence" ? "More diligence" : r ? r[0].toUpperCase() + r.slice(1) : "—";
+function progressPct(status: string) {
+  const i = STAGES.indexOf(status);
+  if (i < 0) return status === "done" ? 100 : 8;
+  return Math.round(((i + 1) / (STAGES.length + 1)) * 100);
 }
 
 export default function Dashboard() {
@@ -32,13 +28,16 @@ export default function Dashboard() {
   const [drag, setDrag] = useState(false);
   const [mock, setMock] = useState<boolean | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<string>("all");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     try {
       setDecks(await listDecks());
-    } catch (e) {
-      setErr("Can't reach the API. Start the backend on :8000.");
+      setErr(null);
+    } catch {
+      setErr("Can't reach the API. Start the backend:  powershell -ExecutionPolicy Bypass -File backend\\run.ps1");
     }
   }, []);
 
@@ -56,7 +55,7 @@ export default function Dashboard() {
       try {
         await uploadDeck(file);
         await refresh();
-      } catch (e) {
+      } catch {
         setErr("Upload failed. Is the backend running?");
       } finally {
         setBusy(false);
@@ -78,29 +77,60 @@ export default function Dashboard() {
     }
   };
 
-  const pending = decks.some((d) => !["done", "error"].includes(d.status));
+  const stats = useMemo(() => {
+    const done = decks.filter((d) => d.status === "done");
+    return {
+      total: decks.length,
+      invest: done.filter((d) => d.recommendation === "invest").length,
+      diligence: done.filter((d) => d.recommendation === "more_diligence").length,
+      pass: done.filter((d) => d.recommendation === "pass").length,
+      running: decks.filter((d) => !["done", "error"].includes(d.status)).length,
+    };
+  }, [decks]);
+
+  const visible = useMemo(() => {
+    return decks.filter((d) => {
+      const matchQ =
+        !query ||
+        d.company_name.toLowerCase().includes(query.toLowerCase()) ||
+        d.filename.toLowerCase().includes(query.toLowerCase());
+      const matchF =
+        filter === "all" ||
+        (filter === "running" && !["done", "error"].includes(d.status)) ||
+        d.recommendation === filter;
+      return matchQ && matchF;
+    });
+  }, [decks, query, filter]);
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-3xl font-bold tracking-tight text-ink-900">Deal flow</h1>
-        <p className="max-w-2xl text-sm text-ink-600">
-          Upload a startup&apos;s pitch deck and get a sharp, fully-sourced investment memo —
-          team risk, real differentiation, diligence questions, and comp-based valuation reasoning.
-        </p>
-      </div>
+      {/* Hero */}
+      <section className="relative overflow-hidden rounded-3xl gradient-brand p-8 text-white shadow-glow sm:p-10">
+        <div className="absolute -right-16 -top-16 h-64 w-64 rounded-full bg-white/10 blur-2xl" />
+        <div className="absolute -bottom-20 -left-10 h-56 w-56 rounded-full bg-violet-400/20 blur-2xl" />
+        <div className="relative max-w-2xl">
+          <span className="chip bg-white/15 text-white backdrop-blur">AI diligence copilot</span>
+          <h1 className="mt-3 text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
+            Turn a pitch deck into a sourced investment memo.
+          </h1>
+          <p className="mt-3 text-sm leading-relaxed text-white/85 sm:text-base">
+            Upload a deck and get team-risk flags, real differentiation checks, sharp diligence
+            questions, and comp-based valuation reasoning — every claim traceable to a deck page or a
+            research source.
+          </p>
+        </div>
+      </section>
 
       {mock && (
-        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <span className="mt-0.5">⚠</span>
-          <div>
-            <b>Mock mode.</b> The pipeline runs end-to-end with deterministic sample research.
-            Add <code className="rounded bg-amber-100 px-1">ANTHROPIC_API_KEY</code> and{" "}
-            <code className="rounded bg-amber-100 px-1">EXA_API_KEY</code> to{" "}
-            <code className="rounded bg-amber-100 px-1">.env</code> for live analysis.
-          </div>
-        </div>
+        <Banner kind="warning" title="Mock mode active">
+          The pipeline runs end-to-end with deterministic sample analysis, so every deck returns the
+          same example memo. Add <code className="rounded bg-amber-100 px-1">ANTHROPIC_API_KEY</code> +{" "}
+          <code className="rounded bg-amber-100 px-1">EXA_API_KEY</code> to{" "}
+          <code className="rounded bg-amber-100 px-1">.env</code> (with Anthropic credits) for real,
+          deck-specific analysis.
+        </Banner>
       )}
+      {err && <Banner kind="error">{err}</Banner>}
 
       {/* Upload */}
       <div
@@ -115,23 +145,23 @@ export default function Dashboard() {
           const f = e.dataTransfer.files?.[0];
           if (f) onFile(f);
         }}
-        className={`card flex flex-col items-center justify-center gap-3 border-2 border-dashed px-6 py-12 text-center transition ${
-          drag ? "border-brand-500 bg-brand-500/5" : "border-ink-100"
+        className={`card card-hover flex flex-col items-center justify-center gap-3 border-2 border-dashed px-6 py-10 text-center ${
+          drag ? "border-brand-500 bg-brand-50" : "border-ink-200"
         }`}
       >
-        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-600/10 text-brand-700">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 16V4" /><path d="m6 10 6-6 6 6" /><path d="M4 20h16" /></svg>
+        <div className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-50 text-brand-600">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 16V4" /><path d="m6 10 6-6 6 6" /><path d="M4 20h16" /></svg>
         </div>
         <div>
-          <p className="text-sm font-semibold text-ink-900">Drop a pitch deck here</p>
-          <p className="text-xs text-ink-400">PDF or PPTX · up to ~30 slides</p>
+          <p className="text-sm font-semibold text-ink-900">Drop a pitch deck to analyze</p>
+          <p className="text-xs text-ink-400">PDF or PPTX · up to 30 MB · drag &amp; drop or browse</p>
         </div>
-        <div className="mt-1 flex gap-2">
+        <div className="mt-1 flex flex-wrap justify-center gap-2">
           <button className="btn-primary" disabled={busy} onClick={() => inputRef.current?.click()}>
             {busy ? "Working…" : "Choose file"}
           </button>
           <button className="btn-ghost" disabled={busy} onClick={onDemo}>
-            Try a demo deck
+            ✨ Try a demo deck
           </button>
         </div>
         <input
@@ -146,67 +176,149 @@ export default function Dashboard() {
         />
       </div>
 
-      {err && <p className="text-sm text-red-600">{err}</p>}
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <StatCard label="Decks" value={stats.total} tone="brand" />
+        <StatCard label="Invest" value={stats.invest} tone="emerald" />
+        <StatCard label="More diligence" value={stats.diligence} tone="amber" />
+        <StatCard label="Pass" value={stats.pass} tone="red" />
+        <StatCard label="Analyzing" value={stats.running} tone="ink" pulse={stats.running > 0} />
+      </div>
 
-      {/* List */}
-      <div className="card overflow-hidden">
-        <div className="flex items-center justify-between border-b border-ink-100 px-5 py-3.5">
-          <h2 className="text-sm font-semibold text-ink-900">
-            Submitted decks <span className="text-ink-400">({decks.length})</span>
-          </h2>
-          {pending && (
-            <span className="flex items-center gap-2 text-xs text-ink-400">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-brand-500" /> analyzing…
-            </span>
-          )}
+      {/* Toolbar */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative w-full sm:max-w-xs">
+          <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search company or file…"
+            className="input pl-9"
+          />
         </div>
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            ["all", "All"],
+            ["running", "Analyzing"],
+            ["invest", "Invest"],
+            ["more_diligence", "Diligence"],
+            ["pass", "Pass"],
+          ].map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setFilter(k)}
+              className={`chip border px-3 py-1.5 transition ${
+                filter === k
+                  ? "border-brand-200 bg-brand-50 text-brand-700"
+                  : "border-ink-200 bg-white text-ink-500 hover:bg-ink-50"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-        {decks.length === 0 ? (
-          <div className="px-5 py-12 text-center text-sm text-ink-400">
-            No decks yet. Upload one above or try the demo.
+      {/* Deck grid */}
+      {visible.length === 0 ? (
+        <div className="card flex flex-col items-center gap-2 px-6 py-16 text-center">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-ink-100 text-ink-400">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
           </div>
+          <p className="text-sm font-medium text-ink-700">
+            {decks.length === 0 ? "No decks yet" : "No matches"}
+          </p>
+          <p className="text-xs text-ink-400">
+            {decks.length === 0 ? "Upload a deck above or try the demo to see a memo." : "Adjust your search or filter."}
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {visible.map((d) => (
+            <DeckCard key={d.id} deck={d} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  tone,
+  pulse,
+}: {
+  label: string;
+  value: number;
+  tone: "brand" | "emerald" | "amber" | "red" | "ink";
+  pulse?: boolean;
+}) {
+  const tones: Record<string, string> = {
+    brand: "text-brand-600",
+    emerald: "text-emerald-600",
+    amber: "text-amber-600",
+    red: "text-red-600",
+    ink: "text-ink-700",
+  };
+  return (
+    <div className="card px-4 py-3">
+      <div className="flex items-center gap-1.5">
+        {pulse && <span className="h-1.5 w-1.5 animate-pulse-ring rounded-full bg-brand-500" />}
+        <p className="text-xs font-medium text-ink-400">{label}</p>
+      </div>
+      <p className={`mt-1 text-2xl font-bold ${tones[tone]}`}>{value}</p>
+    </div>
+  );
+}
+
+function DeckCard({ deck: d }: { deck: DeckListItem }) {
+  const done = d.status === "done";
+  const error = d.status === "error";
+  const running = !done && !error;
+  const meta = recMeta(d.recommendation);
+  const title = d.company_name && d.company_name !== "Unknown" ? d.company_name : d.filename;
+
+  const body = (
+    <div className="card card-hover flex h-full flex-col gap-3 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-semibold text-ink-900">{title}</p>
+          <p className="truncate text-xs text-ink-400">{d.filename}</p>
+        </div>
+        {done && (
+          <span className={`chip shrink-0 ring-1 ${meta.bg} ${meta.text} ${meta.ring}`}>{meta.label}</span>
+        )}
+        {error && <span className="chip shrink-0 bg-red-50 text-red-700">Error</span>}
+      </div>
+
+      {running && (
+        <div className="mt-1">
+          <div className="mb-1 flex items-center gap-2 text-xs font-medium text-brand-700">
+            <span className="h-1.5 w-1.5 animate-pulse-ring rounded-full bg-brand-500" />
+            {STAGE_LABEL[d.status] ?? d.status}…
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-100">
+            <div className="h-full rounded-full gradient-brand transition-all duration-500" style={{ width: `${progressPct(d.status)}%` }} />
+          </div>
+        </div>
+      )}
+
+      <div className="mt-auto flex items-center justify-between pt-1">
+        <span className="text-xs text-ink-400">
+          {new Date(d.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+        </span>
+        {done ? (
+          <>
+            {d.risk_rating && <span className="chip-outline">Risk: {d.risk_rating}</span>}
+            <span className="text-xs font-semibold text-brand-600">View memo →</span>
+          </>
         ) : (
-          <ul className="divide-y divide-ink-100">
-            {decks.map((d) => {
-              const done = d.status === "done";
-              const Row = (
-                <div className="flex items-center justify-between gap-4 px-5 py-4 transition hover:bg-ink-50/60">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-ink-900">
-                      {d.company_name && d.company_name !== "Unknown" ? d.company_name : d.filename}
-                    </p>
-                    <p className="truncate text-xs text-ink-400">{d.filename}</p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {done ? (
-                      <>
-                        <span className={`chip border ${REC_STYLE[d.recommendation] ?? "bg-ink-100 text-ink-600 border-ink-100"}`}>
-                          {recLabel(d.recommendation)}
-                        </span>
-                        {d.risk_rating && (
-                          <span className="chip bg-ink-100 text-ink-600">risk: {d.risk_rating}</span>
-                        )}
-                      </>
-                    ) : d.status === "error" ? (
-                      <span className="chip bg-red-50 text-red-700">Error</span>
-                    ) : (
-                      <span className="chip bg-brand-500/10 text-brand-700">
-                        <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500" />
-                        {STATUS_LABEL[d.status] ?? d.status}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-              return (
-                <li key={d.id}>
-                  {done ? <Link href={`/report/${d.id}`}>{Row}</Link> : Row}
-                </li>
-              );
-            })}
-          </ul>
+          <span className="text-xs text-ink-300">{error ? "Failed" : "In progress"}</span>
         )}
       </div>
     </div>
   );
+
+  return done ? <Link href={`/report/${d.id}`}>{body}</Link> : body;
 }

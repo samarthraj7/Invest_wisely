@@ -61,7 +61,8 @@ def analyze(
         report = InvestmentReport.model_validate(
             _mock_report(entities, understanding, research)
         )
-    report.mock_mode = not llm.live
+    # mock_mode is true if we never had a live model OR a live call failed mid-run.
+    report.mock_mode = not llm.usable
     return report
 
 
