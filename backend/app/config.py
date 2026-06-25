@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     )
 
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-20250514"
+    anthropic_model: str = "claude-sonnet-4-6"
     exa_api_key: str = ""
     proxycurl_api_key: str = ""
 
