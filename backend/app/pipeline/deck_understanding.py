@@ -45,32 +45,54 @@ def understand_deck(deck: ParsedDeck) -> dict[str, Any]:
 
 
 def _mock_understanding(deck: ParsedDeck) -> dict[str, Any]:
-    """Deterministic stand-in shaped like a real seed-stage B2B SaaS deck."""
+    """Deck-DERIVED stand-in used when the LLM is unavailable.
+
+    Contains no invented company: the name is guessed from the filename and the
+    claims are the deck's own first lines. This guarantees a degraded run still
+    reflects the uploaded deck rather than a hardcoded sample company.
+    """
+    name = _guess_name_from_filename(deck.filename)
+    claims: list[dict[str, Any]] = []
+    for s in deck.slides:
+        for line in (s.text or "").splitlines():
+            line = line.strip()
+            if len(line) >= 12:
+                claims.append({"claim": line[:200], "page": s.page})
+            if len(claims) >= 12:
+                break
+        if len(claims) >= 12:
+            break
+
     return {
         "company": {
-            "name": "NimbusGrid",
-            "one_liner": "AI-driven load balancing for industrial battery storage sites.",
-            "sector": "Climate / Energy SaaS",
-            "stage": "Seed",
-            "location": "Austin, TX",
-            "ask": "Raising $4M seed at $20M post-money",
+            "name": name,
+            "one_liner": claims[0]["claim"] if claims else "",
+            "sector": None,
+            "stage": None,
+            "location": None,
+            "ask": None,
         },
-        "deck_claims": [
-            {"claim": "Reduces grid-storage operating costs by 30%", "page": 3},
-            {"claim": "$1.2M ARR with 8 enterprise pilots", "page": 5},
-            {"claim": "Proprietary forecasting model is '10x more accurate'", "page": 6},
-            {"claim": "Targeting $48B grid-storage software market by 2030", "page": 4},
-        ],
-        "market_claims": [
-            {"claim": "Grid-storage software TAM of $48B by 2030", "page": 4},
-            {"claim": "No direct competitor offers real-time AI dispatch", "page": 7},
-        ],
-        "team": [
-            {"name": "Dana Okafor", "title": "CEO & Co-founder",
-             "linkedin_url": None, "page": 9},
-            {"name": "Marc Liang", "title": "CTO & Co-founder",
-             "linkedin_url": None, "page": 9},
-        ],
-        "competitors_named": ["Stem Inc", "Fluence"],
+        "deck_claims": claims,
+        "market_claims": [],
+        "team": [],
+        "competitors_named": [],
         "_mock": True,
     }
+
+
+def _guess_name_from_filename(filename: str) -> str:
+    import re
+
+    stem = filename.rsplit(".", 1)[0]
+    # Drop a leading uuid_ prefix the API adds.
+    stem = re.sub(r"^[0-9a-fA-F-]{8,}_", "", stem)
+    # Normalize separators to spaces first, so word boundaries work, then drop
+    # common deck filler words.
+    stem = re.sub(r"[-_]+", " ", stem)
+    stem = re.sub(
+        r"(?i)\b(pitch|deck|seed|series\s?[a-d]|round|investor|presentation|final|v\d+)\b",
+        " ",
+        stem,
+    )
+    stem = re.sub(r"\s+", " ", stem).strip()
+    return stem.title() if stem else "Unknown"

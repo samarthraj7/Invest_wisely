@@ -88,6 +88,63 @@ class LLMClient:
                 self._mark_degraded(_clean_error(exc))
                 return mock
 
+    def ocr_image(self, image_bytes: bytes, media_type: str = "image/png") -> str:
+        """Transcribe visible text from a single page/slide image via Claude
+        vision. Returns "" when unavailable or on failure (never raises)."""
+        if not self.live:
+            return ""
+        import base64
+
+        b64 = base64.standard_b64encode(image_bytes).decode("ascii")
+        system = (
+            "You are a precise OCR engine for startup pitch decks. Transcribe ALL "
+            "visible text from the image verbatim, preserving reading order. Include "
+            "headings, bullets, numbers, metrics, axis/legend labels, names, titles, "
+            "and footnotes. Do NOT summarize, explain, translate, or invent text. "
+            "Output only the transcribed text; if the image has no text, output nothing."
+        )
+
+        def _attempt() -> str:
+            msg = self._client.messages.create(  # type: ignore[union-attr]
+                model=self.settings.anthropic_model,
+                max_tokens=1500,
+                system=system,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": b64,
+                                },
+                            },
+                            {"type": "text", "text": "Transcribe all text in this slide."},
+                        ],
+                    }
+                ],
+            )
+            return "".join(
+                b.text for b in msg.content if getattr(b, "type", "") == "text"
+            ).strip()
+
+        retriable = self._retriable()
+        attempt = 0
+        while True:
+            try:
+                return _attempt()
+            except retriable:
+                attempt += 1
+                if attempt > _MAX_RETRIES:
+                    self._mark_degraded("Anthropic temporarily unavailable (rate limit / outage).")
+                    return ""
+                time.sleep(_BASE_DELAY_S * (2 ** (attempt - 1)))
+            except Exception as exc:  # noqa: BLE001 - OCR must never crash the run
+                self._mark_degraded(_clean_error(exc))
+                return ""
+
     def _mark_degraded(self, reason: str) -> None:
         self.degraded = True
         self.last_error = reason
@@ -114,17 +171,79 @@ def _clean_error(exc: Exception) -> str:
 def _extract_json(text: str, fallback: dict[str, Any]) -> dict[str, Any]:
     import json
 
-    text = text.strip()
+    text = (text or "").strip()
+    if not text:
+        return fallback
+
+    # Strip ``` / ```json fences if present.
     if text.startswith("```"):
-        text = text.strip("`")
-        text = text[text.find("{") :]
+        nl = text.find("\n")
+        if nl != -1:
+            text = text[nl + 1 :]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+        text = text.strip()
+
     start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end == -1:
+    if start == -1 or end == -1 or end <= start:
         return fallback
+
+    candidate = text[start : end + 1]
     try:
-        return json.loads(text[start : end + 1])
+        return json.loads(candidate)
     except json.JSONDecodeError:
-        return fallback
+        pass
+
+    # Best-effort repair: balance braces/brackets for a response truncated at
+    # max_tokens, and drop a trailing partial line, so a near-complete memo
+    # still parses instead of collapsing to the placeholder.
+    repaired = _balance_json(candidate)
+    if repaired is not None:
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            return fallback
+    return fallback
+
+
+def _balance_json(s: str) -> Optional[str]:
+    """Close unterminated strings/objects/arrays from a truncated JSON object."""
+    out: list[str] = []
+    stack: list[str] = []
+    in_str = False
+    escaped = False
+    for ch in s:
+        if in_str:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+            out.append(ch)
+        elif ch in "}]":
+            if stack and stack[-1] == ch:
+                stack.pop()
+            out.append(ch)
+        else:
+            out.append(ch)
+
+    if in_str:
+        out.append('"')
+    # Remove a dangling comma / partial key before closing.
+    tail = "".join(out).rstrip()
+    while tail and tail[-1] in ",:":
+        tail = tail[:-1].rstrip()
+    for closer in reversed(stack):
+        tail += closer
+    return tail or None
 
 
 _singleton: Optional[LLMClient] = None

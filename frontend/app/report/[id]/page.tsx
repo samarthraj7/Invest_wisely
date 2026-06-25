@@ -173,17 +173,46 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                     <ConfidenceBadge c={m.research_confidence} />
                   </div>
                 </div>
-                <div className="mt-3 space-y-2">
-                  {m.researched_background.map((c, k) => (
-                    <ClaimRow key={`b${k}`} claim={c} />
-                  ))}
-                  {m.gaps_vs_venture.map((c, k) => (
-                    <div key={`g${k}`} className="rounded-xl border border-orange-200 bg-orange-50/60 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-orange-600">Gap vs. venture</p>
-                      <p className="mt-1 text-sm text-ink-800">{c.claim}</p>
-                      <SourceTag claim={c} />
+                <div className="mt-3 space-y-3">
+                  {(m.researched_background?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
+                        Background &amp; experience
+                      </p>
+                      <div className="space-y-2">
+                        {m.researched_background.map((c, k) => (
+                          <ClaimRow key={`b${k}`} claim={c} />
+                        ))}
+                      </div>
                     </div>
-                  ))}
+                  )}
+
+                  {(m.strengths?.length ?? 0) > 0 &&
+                    m.strengths.map((c, k) => (
+                      <div key={`s${k}`} className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Strength</p>
+                        <p className="mt-1 text-sm text-ink-800">{c.claim}</p>
+                        <SourceTag claim={c} />
+                      </div>
+                    ))}
+
+                  {(m.founder_market_fit?.length ?? 0) > 0 &&
+                    m.founder_market_fit.map((c, k) => (
+                      <div key={`f${k}`} className="rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">Founder–market fit</p>
+                        <p className="mt-1 text-sm text-ink-800">{c.claim}</p>
+                        <SourceTag claim={c} />
+                      </div>
+                    ))}
+
+                  {(m.gaps_vs_venture?.length ?? 0) > 0 &&
+                    m.gaps_vs_venture.map((c, k) => (
+                      <div key={`g${k}`} className="rounded-xl border border-orange-200 bg-orange-50/60 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-orange-600">Gap vs. venture</p>
+                        <p className="mt-1 text-sm text-ink-800">{c.claim}</p>
+                        <SourceTag claim={c} />
+                      </div>
+                    ))}
                 </div>
               </div>
             ))}

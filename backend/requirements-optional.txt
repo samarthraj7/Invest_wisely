@@ -6,3 +6,16 @@
 # the browser's "Print -> Save as PDF". On macOS:  brew install pango
 # On Debian/Ubuntu:  apt-get install libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0
 weasyprint==63.1
+
+# --- Optional: LOCAL (free) OCR for image-only / scanned decks ---
+# Not required for OCR to work. With these + the Tesseract binary installed,
+# OCR runs locally for free. Without them, the app automatically falls back to
+# Claude vision OCR using your ANTHROPIC_API_KEY (no install needed).
+#
+# 1) Install the Tesseract engine (native):
+#    Windows:  winget install UB-Mannheim.TesseractOCR   (then add it to PATH)
+#    macOS:    brew install tesseract
+#    Debian/Ubuntu:  apt-get install tesseract-ocr
+# 2) Then install these Python packages:
+pytesseract==0.3.13
+Pillow==10.4.0

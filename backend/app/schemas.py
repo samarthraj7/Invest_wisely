@@ -9,7 +9,34 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from pydantic_core import PydanticUndefined
+
+
+class _SafeModel(BaseModel):
+    """Base model that tolerates a sloppy LLM.
+
+    LLMs occasionally emit ``null`` (or omit a value) for a field we declared as
+    required. Rather than letting one missing field blow up the entire report
+    (and surface as an opaque deck error), we repair ``None`` values:
+      * plain ``str`` fields  -> ``""``
+      * any field that has a non-``None`` default -> that default (e.g. enums)
+    Optional fields legitimately keep their ``None``.
+    """
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _repair_none(cls, v, info):
+        if v is not None:
+            return v
+        field = cls.model_fields.get(info.field_name)
+        if field is None:
+            return v
+        if field.annotation is str:
+            return ""
+        if field.default is not PydanticUndefined and field.default is not None:
+            return field.default
+        return v
 
 
 class SourceType(str, Enum):
@@ -39,17 +66,17 @@ class Recommendation(str, Enum):
     more_diligence = "more_diligence"
 
 
-class Claim(BaseModel):
+class Claim(_SafeModel):
     """An atomic, sourced statement. The backbone of the whole report."""
     claim: str
-    source_type: SourceType
-    source_ref: str = Field(..., description='"deck p.7" or a URL')
+    source_type: SourceType = SourceType.inference
+    source_ref: str = Field(default="", description='"deck p.7" or a URL')
     confidence: Confidence = Confidence.medium
 
 
-class CompanySnapshot(BaseModel):
-    name: str
-    one_liner: str
+class CompanySnapshot(_SafeModel):
+    name: str = ""
+    one_liner: str = ""
     sector: Optional[str] = None
     stage: Optional[str] = None
     location: Optional[str] = None
@@ -57,12 +84,26 @@ class CompanySnapshot(BaseModel):
     deck_claims: List[Claim] = Field(default_factory=list)
 
 
-class TeamMemberAnalysis(BaseModel):
-    name: str
+class TeamMemberAnalysis(_SafeModel):
+    name: str = ""
     title: Optional[str] = None
     linkedin_url: Optional[str] = None
     deck_claims: List[Claim] = Field(default_factory=list)
-    researched_background: List[Claim] = Field(default_factory=list)
+    researched_background: List[Claim] = Field(
+        default_factory=list,
+        description="What the person has actually done: prior roles, companies, years of "
+        "experience, education, notable achievements/exits — sourced from research.",
+    )
+    strengths: List[Claim] = Field(
+        default_factory=list,
+        description="Concrete positive signals for executing THIS venture: relevant domain "
+        "depth, scaling/operating experience, prior wins, technical credibility.",
+    )
+    founder_market_fit: List[Claim] = Field(
+        default_factory=list,
+        description="Assessment of how well this person's track record positions them to "
+        "deliver the specific plan in the deck (the future they're proposing).",
+    )
     gaps_vs_venture: List[Claim] = Field(
         default_factory=list,
         description="Specific gaps between this person's background and what THIS venture needs",
@@ -70,36 +111,36 @@ class TeamMemberAnalysis(BaseModel):
     research_confidence: Confidence = Confidence.inconclusive
 
 
-class Competitor(BaseModel):
-    name: str
-    relationship: str = Field(..., description="e.g. direct, adjacent, incumbent")
+class Competitor(_SafeModel):
+    name: str = ""
+    relationship: str = Field(default="", description="e.g. direct, adjacent, incumbent")
     note: Claim
 
 
-class CompetitiveLandscape(BaseModel):
+class CompetitiveLandscape(_SafeModel):
     named_in_deck: List[Competitor] = Field(default_factory=list)
     discovered: List[Competitor] = Field(default_factory=list)
     differentiation_assessment: List[Claim] = Field(default_factory=list)
 
 
-class RedFlag(BaseModel):
-    title: str
-    severity: Severity
+class RedFlag(_SafeModel):
+    title: str = ""
+    severity: Severity = Severity.medium
     reasoning: Claim
 
 
-class DiligenceQuestion(BaseModel):
-    question: str
-    targets_gap: str = Field(..., description="Which ambiguity/gap this closes")
+class DiligenceQuestion(_SafeModel):
+    question: str = ""
+    targets_gap: str = Field(default="", description="Which ambiguity/gap this closes")
 
 
-class ValuationComp(BaseModel):
-    company: str
-    detail: str = Field(..., description="stage / round size / valuation / multiple")
+class ValuationComp(_SafeModel):
+    company: str = ""
+    detail: str = Field(default="", description="stage / round size / valuation / multiple")
     source: Claim
 
 
-class ValuationAnalysis(BaseModel):
+class ValuationAnalysis(_SafeModel):
     comps: List[ValuationComp] = Field(default_factory=list)
     assumptions: List[str] = Field(default_factory=list)
     multiples_used: Optional[str] = None
@@ -112,15 +153,15 @@ class ValuationAnalysis(BaseModel):
     )
 
 
-class FinalRecommendation(BaseModel):
-    recommendation: Recommendation
+class FinalRecommendation(_SafeModel):
+    recommendation: Recommendation = Recommendation.more_diligence
     suggested_check_size: Optional[str] = None
-    risk_rating: str = Field(..., description="e.g. 'High' / 'Medium' / 'Low'")
+    risk_rating: str = Field(default="Medium", description="e.g. 'High' / 'Medium' / 'Low'")
     risk_factors: List[Claim] = Field(default_factory=list)
-    rationale: str
+    rationale: str = ""
 
 
-class InvestmentReport(BaseModel):
+class InvestmentReport(_SafeModel):
     """The full report. Mirrors the target structure in the brief."""
     company_snapshot: CompanySnapshot
     team_analysis: List[TeamMemberAnalysis] = Field(default_factory=list)

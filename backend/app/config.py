@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     allow_mock_mode: bool = True
     research_cache_ttl_days: int = 30
 
+    # OCR fallback for image-only / scanned decks (PDF). Triggered only when a
+    # page has images but little/no selectable text.
+    #   ocr_engine: "auto" -> local Tesseract if installed, else Claude vision
+    #               "vision" -> always use Claude vision (uses ANTHROPIC_API_KEY)
+    #               "tesseract" -> only local Tesseract
+    #               "off" -> disable OCR entirely
+    ocr_engine: str = "auto"
+    ocr_max_pages: int = 20          # cost guard: at most this many pages OCR'd
+    ocr_min_chars_per_page: int = 30  # a page below this (with images) is a candidate
+
     database_url: str = "sqlite:///./storage/invest_wisely.sqlite3"
     frontend_origin: str = "http://localhost:3000"
 

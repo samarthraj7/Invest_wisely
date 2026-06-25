@@ -17,6 +17,12 @@ from pathlib import Path
 # text-empty (likely scanned / image-only) and warn rather than fail.
 _MIN_MEANINGFUL_CHARS = 40
 
+IMAGE_ONLY_WARNING = (
+    "Very little selectable text was extracted - this deck looks image-only "
+    "or scanned. Analysis will rely on limited text; consider an OCR pass or a "
+    "text-based export of the deck for higher confidence."
+)
+
 
 class DeckParseError(Exception):
     """Raised when a deck cannot be parsed at all."""
@@ -27,6 +33,7 @@ class ParsedSlide:
     page: int
     text: str
     image_count: int = 0
+    ocr: bool = False  # True if this page's text came from an OCR pass
 
 
 @dataclass
@@ -72,11 +79,7 @@ def _add_quality_warnings(deck: ParsedDeck) -> None:
     if not deck.slides:
         raise DeckParseError("No pages/slides found in the deck.")
     if deck.total_chars < _MIN_MEANINGFUL_CHARS:
-        deck.warnings.append(
-            "Very little selectable text was extracted - this deck looks image-only "
-            "or scanned. Analysis will rely on limited text; consider an OCR pass or a "
-            "text-based export of the deck for higher confidence."
-        )
+        deck.warnings.append(IMAGE_ONLY_WARNING)
 
 
 def _parse_pdf(path: Path) -> ParsedDeck:

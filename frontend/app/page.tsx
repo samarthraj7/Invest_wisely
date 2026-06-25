@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { health, listDecks, runDemo, uploadDeck } from "@/lib/api";
+import { deleteDeck, health, listDecks, runDemo, uploadDeck } from "@/lib/api";
 import type { DeckListItem } from "@/lib/types";
 import { Banner, recMeta } from "@/components/ui";
 
-const STAGES = ["pending", "parsing", "understanding", "extracting", "researching", "analyzing"];
+const STAGES = ["pending", "parsing", "ocr", "understanding", "extracting", "researching", "analyzing"];
 const STAGE_LABEL: Record<string, string> = {
   pending: "Queued",
   parsing: "Parsing deck",
+  ocr: "Reading images (OCR)",
   understanding: "Reading deck",
   extracting: "Extracting team",
   researching: "Researching web",
@@ -59,6 +60,18 @@ export default function Dashboard() {
         setErr("Upload failed. Is the backend running?");
       } finally {
         setBusy(false);
+      }
+    },
+    [refresh]
+  );
+
+  const remove = useCallback(
+    async (id: string) => {
+      setDecks((prev) => prev.filter((d) => d.id !== id));
+      try {
+        await deleteDeck(id);
+      } catch {
+        refresh();
       }
     },
     [refresh]
@@ -235,7 +248,7 @@ export default function Dashboard() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {visible.map((d) => (
-            <DeckCard key={d.id} deck={d} />
+            <DeckCard key={d.id} deck={d} onDelete={remove} />
           ))}
         </div>
       )}
@@ -272,12 +285,28 @@ function StatCard({
   );
 }
 
-function DeckCard({ deck: d }: { deck: DeckListItem }) {
+function DeckCard({
+  deck: d,
+  onDelete,
+}: {
+  deck: DeckListItem;
+  onDelete: (id: string) => void;
+}) {
   const done = d.status === "done";
   const error = d.status === "error";
   const running = !done && !error;
   const meta = recMeta(d.recommendation);
   const title = d.company_name && d.company_name !== "Unknown" ? d.company_name : d.filename;
+
+  const when = new Date(d.created_at);
+  const whenLabel = isNaN(when.getTime())
+    ? ""
+    : when.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
 
   const body = (
     <div className="card card-hover flex h-full flex-col gap-3 p-5">
@@ -304,15 +333,19 @@ function DeckCard({ deck: d }: { deck: DeckListItem }) {
         </div>
       )}
 
+      {error && d.error && (
+        <p className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs leading-snug text-red-700 line-clamp-3">
+          {d.error}
+        </p>
+      )}
+
       <div className="mt-auto flex items-center justify-between pt-1">
-        <span className="text-xs text-ink-400">
-          {new Date(d.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-        </span>
+        <span className="text-xs text-ink-400">{whenLabel}</span>
         {done ? (
-          <>
+          <span className="flex items-center gap-2">
             {d.risk_rating && <span className="chip-outline">Risk: {d.risk_rating}</span>}
             <span className="text-xs font-semibold text-brand-600">View memo →</span>
-          </>
+          </span>
         ) : (
           <span className="text-xs text-ink-300">{error ? "Failed" : "In progress"}</span>
         )}
@@ -320,5 +353,21 @@ function DeckCard({ deck: d }: { deck: DeckListItem }) {
     </div>
   );
 
-  return done ? <Link href={`/report/${d.id}`}>{body}</Link> : body;
+  return (
+    <div className="group relative">
+      {done ? <Link href={`/report/${d.id}`}>{body}</Link> : body}
+      <button
+        title="Remove"
+        aria-label="Remove deck"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onDelete(d.id);
+        }}
+        className="absolute right-2 top-2 z-10 grid h-7 w-7 place-items-center rounded-full bg-white/85 text-ink-400 shadow-sm ring-1 ring-ink-200 backdrop-blur transition hover:bg-red-50 hover:text-red-600"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+      </button>
+    </div>
+  );
 }

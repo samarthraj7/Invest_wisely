@@ -26,6 +26,10 @@ export async function runDemo(): Promise<{ id: string }> {
   return j(await fetch(`${API_BASE}/api/decks/demo`, { method: "POST" }));
 }
 
+export async function deleteDeck(id: string): Promise<{ ok: boolean }> {
+  return j(await fetch(`${API_BASE}/api/decks/${id}`, { method: "DELETE" }));
+}
+
 export type ExportFormat = "pdf" | "docx" | "html";
 
 export function exportUrl(id: string, format: ExportFormat = "pdf"): string {

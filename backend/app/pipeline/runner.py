@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from ..config import get_settings
 from ..schemas import InvestmentReport
-from . import analysis, deck_understanding, entities, parse, research
+from . import analysis, deck_understanding, entities, ocr, parse, research
 
 StageCb = Optional[Callable[[str], None]]
 
@@ -32,6 +33,16 @@ def run_pipeline(deck_path: str | Path, on_stage: StageCb = None) -> PipelineRes
 
     stage("parsing")
     parsed = parse.parse_deck(deck_path)  # DeckParseError propagates (fatal)
+
+    # Image-only / scanned deck? Recover text via OCR before anything else reads it.
+    _s = get_settings()
+    if _s.ocr_engine != "off" and ocr.candidate_pages(parsed, _s.ocr_min_chars_per_page):
+        stage("ocr")
+        try:
+            ocr.maybe_run_ocr(parsed, deck_path)
+        except Exception as exc:  # noqa: BLE001 - OCR is best-effort, never fatal
+            warnings.append(f"OCR step skipped ({exc.__class__.__name__}).")
+
     warnings.extend(parsed.warnings)
 
     stage("understanding")

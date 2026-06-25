@@ -25,6 +25,8 @@ export interface TeamMember {
   linkedin_url?: string | null;
   deck_claims: Claim[];
   researched_background: Claim[];
+  strengths: Claim[];
+  founder_market_fit: Claim[];
   gaps_vs_venture: Claim[];
   research_confidence: Confidence;
 }
@@ -92,6 +94,7 @@ export interface DeckListItem {
   filename: string;
   company_name: string;
   status: string;
+  error?: string;
   recommendation: string;
   risk_rating: string;
   created_at: string;

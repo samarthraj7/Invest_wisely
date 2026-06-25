@@ -114,6 +114,18 @@ def upload_demo(bg: BackgroundTasks) -> dict:
     return _create_and_run(path.name, path, bg)
 
 
+def _iso_utc(d) -> str | None:
+    """Serialize a stored UTC datetime with an explicit 'Z' so browsers convert
+    it to the viewer's local time instead of misreading naive UTC as local."""
+    if d is None:
+        return None
+    import datetime as _dt
+
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=_dt.timezone.utc)
+    return d.astimezone(_dt.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 @app.get("/api/decks")
 def list_decks() -> list[dict]:
     with SessionLocal() as s:
@@ -124,9 +136,10 @@ def list_decks() -> list[dict]:
                 "filename": d.filename,
                 "company_name": d.company_name,
                 "status": d.status,
+                "error": (d.error or "")[:300],
                 "recommendation": d.recommendation,
                 "risk_rating": d.risk_rating,
-                "created_at": d.created_at.isoformat(),
+                "created_at": _iso_utc(d.created_at),
             }
             for d in rows
         ]
@@ -145,7 +158,7 @@ def get_deck(deck_id: str) -> dict:
             "status": d.status,
             "error": d.error,
             "report": d.report_json,
-            "created_at": d.created_at.isoformat(),
+            "created_at": _iso_utc(d.created_at),
         }
 
 
@@ -154,6 +167,17 @@ _MEDIA = {
     "html": "text/html",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
+
+
+@app.delete("/api/decks/{deck_id}")
+def delete_deck(deck_id: str) -> dict:
+    with SessionLocal() as s:
+        d = s.get(Deck, deck_id)
+        if not d:
+            raise HTTPException(404, "Deck not found")
+        s.delete(d)
+        s.commit()
+    return {"ok": True, "id": deck_id}
 
 
 @app.get("/api/decks/{deck_id}/export")

@@ -50,8 +50,14 @@ _TEMPLATE = Template(
 {% for m in r.team_analysis %}
  <p><b>{{ m.name }}</b> — {{ m.title or '' }}
    <span class="conf">research: {{ m.research_confidence.value }}</span></p>
- {% for c in m.researched_background %}{{ claim(c) }}{% endfor %}
- {% for c in m.gaps_vs_venture %}{{ claim(c) }}{% endfor %}
+ {% if m.researched_background %}<p class="muted" style="font-size:12px;margin:4px 0 0"><b>Background &amp; experience</b></p>
+ {% for c in m.researched_background %}{{ claim(c) }}{% endfor %}{% endif %}
+ {% if m.strengths %}<p class="muted" style="font-size:12px;margin:4px 0 0"><b>Strengths</b></p>
+ {% for c in m.strengths %}{{ claim(c) }}{% endfor %}{% endif %}
+ {% if m.founder_market_fit %}<p class="muted" style="font-size:12px;margin:4px 0 0"><b>Founder–market fit</b></p>
+ {% for c in m.founder_market_fit %}{{ claim(c) }}{% endfor %}{% endif %}
+ {% if m.gaps_vs_venture %}<p class="muted" style="font-size:12px;margin:4px 0 0"><b>Gaps vs. venture</b></p>
+ {% for c in m.gaps_vs_venture %}{{ claim(c) }}{% endfor %}{% endif %}
 {% endfor %}
 
 <h2>3 · Competitive landscape</h2>
@@ -168,8 +174,16 @@ def _export_docx(report: InvestmentReport, out_path: Path) -> tuple[Path, str]:
     doc.add_heading("2 · Team analysis", level=1)
     for m in r.team_analysis:
         doc.add_heading(f"{m.name} — {m.title or ''}  (research: {m.research_confidence.value})", level=2)
-        for c in m.researched_background + m.gaps_vs_venture:
-            claim_p(c)
+        for label, claims in (
+            ("Background & experience", m.researched_background),
+            ("Strengths", m.strengths),
+            ("Founder-market fit", m.founder_market_fit),
+            ("Gaps vs. venture", m.gaps_vs_venture),
+        ):
+            if claims:
+                doc.add_paragraph(label).runs[0].bold = True
+                for c in claims:
+                    claim_p(c)
 
     doc.add_heading("3 · Competitive landscape", level=1)
     for c in r.competitive_landscape.named_in_deck + r.competitive_landscape.discovered:
