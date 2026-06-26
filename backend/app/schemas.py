@@ -153,6 +153,36 @@ class ValuationAnalysis(_SafeModel):
     )
 
 
+class QAExchange(_SafeModel):
+    """A cross-question from the audience and how the presenter handled it."""
+    question: str = ""
+    answer: str = Field(default="", description="What the presenter actually answered")
+    assessment: str = Field(
+        default="", description="How well the answer addressed the question (direct? evasive? data-backed?)"
+    )
+    confidence: Confidence = Confidence.medium
+
+
+class PitchDelivery(_SafeModel):
+    """Analysis of how the pitch was delivered, derived from a transcript and/or
+    video. `tone` is only populated when a video was provided."""
+    available: bool = False
+    source: str = Field(default="", description='"transcript" | "video" | "video+transcript"')
+    clarity: str = Field(default="", description="How clearly the presenter communicated the idea")
+    structure: str = Field(default="", description="How well-organized / coherent the narrative was")
+    handling_of_questions: str = Field(
+        default="", description="How well the presenter handled cross-questions overall"
+    )
+    tone: str = Field(
+        default="",
+        description="Delivery tone/confidence/energy — populated ONLY when a video was uploaded.",
+    )
+    strengths: List[str] = Field(default_factory=list)
+    weaknesses: List[str] = Field(default_factory=list)
+    qa: List[QAExchange] = Field(default_factory=list)
+    notes: List[Claim] = Field(default_factory=list)
+
+
 class FinalRecommendation(_SafeModel):
     recommendation: Recommendation = Recommendation.more_diligence
     suggested_check_size: Optional[str] = None
@@ -163,12 +193,18 @@ class FinalRecommendation(_SafeModel):
 
 class InvestmentReport(_SafeModel):
     """The full report. Mirrors the target structure in the brief."""
+    executive_summary: str = Field(
+        default="",
+        description="Consolidated 3-6 sentence partner-facing take synthesizing team, "
+        "market/differentiation, traction, valuation, and the bottom-line call.",
+    )
     company_snapshot: CompanySnapshot
     team_analysis: List[TeamMemberAnalysis] = Field(default_factory=list)
     competitive_landscape: CompetitiveLandscape
     red_flags: List[RedFlag] = Field(default_factory=list)
     diligence_questions: List[DiligenceQuestion] = Field(default_factory=list)
     valuation: ValuationAnalysis
+    delivery: PitchDelivery = Field(default_factory=PitchDelivery)
     recommendation: FinalRecommendation
     analyst_note: str = Field(
         default="Directional analyst support. Augments, not replaces, partner judgment.",

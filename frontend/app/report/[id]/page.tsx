@@ -54,6 +54,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
   const s = r.company_snapshot;
   const rec = r.recommendation;
   const meta = recMeta(rec.recommendation);
+  const hasDelivery = !!(r.delivery && r.delivery.available);
   const sevCounts = r.red_flags.reduce<Record<string, number>>((a, f) => {
     a[f.severity] = (a[f.severity] || 0) + 1;
     return a;
@@ -136,6 +137,16 @@ export default function ReportPage({ params }: { params: { id: string } }) {
         </div>
       </div>
 
+      {/* Consolidated summary */}
+      {r.executive_summary && (
+        <div className="card border-l-4 border-brand-500 px-5 py-4">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-600">
+            Consolidated summary
+          </p>
+          <p className="text-sm leading-relaxed text-ink-800">{r.executive_summary}</p>
+        </div>
+      )}
+
       {/* Two-column: sticky nav + content */}
       <div className="grid gap-6 lg:grid-cols-[200px_1fr]">
         <nav className="hidden lg:block print:hidden">
@@ -146,6 +157,12 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                 {label}
               </a>
             ))}
+            {hasDelivery && (
+              <a href="#delivery" className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-ink-500 transition hover:bg-ink-50 hover:text-ink-900">
+                <span className="text-xs font-semibold text-ink-300">{NAV.length + 1}</span>
+                Pitch delivery
+              </a>
+            )}
           </div>
         </nav>
 
@@ -338,6 +355,61 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             ))}
           </Section>
 
+          {hasDelivery && r.delivery && (
+            <Section id="delivery" n={NAV.length + 1} title="Pitch delivery & Q&A">
+              {r.delivery.source && (
+                <span className="chip bg-ink-100 text-ink-600">source: {r.delivery.source}</span>
+              )}
+              <div className="grid gap-3 sm:grid-cols-2">
+                {r.delivery.clarity && <DeliveryCell label="Clarity" value={r.delivery.clarity} />}
+                {r.delivery.structure && <DeliveryCell label="Structure" value={r.delivery.structure} />}
+                {r.delivery.handling_of_questions && (
+                  <DeliveryCell label="Handling of cross-questions" value={r.delivery.handling_of_questions} />
+                )}
+                {r.delivery.tone && <DeliveryCell label="Tone (from video)" value={r.delivery.tone} />}
+              </div>
+
+              {(r.delivery.strengths.length > 0 || r.delivery.weaknesses.length > 0) && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {r.delivery.strengths.length > 0 && (
+                    <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Delivery strengths</p>
+                      <ul className="mt-2 space-y-1 text-sm text-ink-700">
+                        {r.delivery.strengths.map((x, i) => <li key={i}>• {x}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {r.delivery.weaknesses.length > 0 && (
+                    <div className="rounded-xl border border-amber-100 bg-amber-50/50 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Delivery weaknesses</p>
+                      <ul className="mt-2 space-y-1 text-sm text-ink-700">
+                        {r.delivery.weaknesses.map((x, i) => <li key={i}>• {x}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {r.delivery.qa.length > 0 && (
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">Questions &amp; answers</p>
+                  {r.delivery.qa.map((q, i) => (
+                    <div key={i} className="rounded-xl border border-ink-100 bg-white px-4 py-3">
+                      <p className="text-sm font-medium text-ink-900">Q. {q.question}</p>
+                      {q.answer && <p className="mt-1 text-sm text-ink-600"><span className="font-medium text-ink-500">A.</span> {q.answer}</p>}
+                      {q.assessment && (
+                        <p className="mt-2 flex items-start gap-2 text-xs text-ink-500">
+                          <span className="chip bg-ink-100 text-ink-600">{q.confidence}</span>
+                          <span>{q.assessment}</span>
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Section>
+          )}
+
           <p className="rounded-2xl bg-ink-100/60 px-4 py-3 text-center text-xs text-ink-500">{r.analyst_note}</p>
         </div>
       </div>
@@ -350,6 +422,15 @@ function HeroStat({ label, value }: { label: string; value: React.ReactNode }) {
     <div className="px-4 py-3">
       <p className="text-[10px] uppercase tracking-wider text-ink-400">{label}</p>
       <div className="mt-0.5 text-sm font-semibold text-ink-900">{value}</div>
+    </div>
+  );
+}
+
+function DeliveryCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-ink-100 bg-white px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">{label}</p>
+      <p className="mt-1 text-sm text-ink-700">{value}</p>
     </div>
   );
 }

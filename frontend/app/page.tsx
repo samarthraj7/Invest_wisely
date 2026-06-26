@@ -6,15 +6,17 @@ import { deleteDeck, health, listDecks, runDemo, uploadDeck } from "@/lib/api";
 import type { DeckListItem } from "@/lib/types";
 import { Banner, recMeta } from "@/components/ui";
 
-const STAGES = ["pending", "parsing", "ocr", "understanding", "extracting", "researching", "analyzing"];
+const STAGES = ["pending", "parsing", "transcribing", "ocr", "understanding", "extracting", "researching", "analyzing", "delivery"];
 const STAGE_LABEL: Record<string, string> = {
   pending: "Queued",
   parsing: "Parsing deck",
+  transcribing: "Transcribing video",
   ocr: "Reading images (OCR)",
   understanding: "Reading deck",
   extracting: "Extracting team",
   researching: "Researching web",
   analyzing: "Writing memo",
+  delivery: "Analyzing delivery",
 };
 
 function progressPct(status: string) {
@@ -32,6 +34,12 @@ export default function Dashboard() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string>("all");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Optional pitch-recording inputs.
+  const [showExtras, setShowExtras] = useState(false);
+  const [transcriptText, setTranscriptText] = useState("");
+  const [transcriptFile, setTranscriptFile] = useState<File | null>(null);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -54,7 +62,14 @@ export default function Dashboard() {
       setBusy(true);
       setErr(null);
       try {
-        await uploadDeck(file);
+        await uploadDeck(file, {
+          transcriptText,
+          transcriptFile,
+          video: videoFile,
+        });
+        setTranscriptText("");
+        setTranscriptFile(null);
+        setVideoFile(null);
         await refresh();
       } catch {
         setErr("Upload failed. Is the backend running?");
@@ -62,7 +77,7 @@ export default function Dashboard() {
         setBusy(false);
       }
     },
-    [refresh]
+    [refresh, transcriptText, transcriptFile, videoFile]
   );
 
   const remove = useCallback(
@@ -187,6 +202,71 @@ export default function Dashboard() {
             if (f) onFile(f);
           }}
         />
+      </div>
+
+      {/* Optional pitch recording */}
+      <div className="card px-5 py-4">
+        <button
+          onClick={() => setShowExtras((v) => !v)}
+          className="flex w-full items-center justify-between text-left"
+        >
+          <span className="flex items-center gap-2 text-sm font-semibold text-ink-800">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><path d="M12 19v3" /></svg>
+            Add pitch recording (optional)
+            {(transcriptText || transcriptFile || videoFile) && (
+              <span className="chip bg-brand-50 text-brand-700">attached</span>
+            )}
+          </span>
+          <span className="text-xs text-ink-400">{showExtras ? "Hide" : "Show"}</span>
+        </button>
+
+        {showExtras && (
+          <div className="mt-4 space-y-4">
+            <p className="text-xs text-ink-400">
+              A transcript deepens the company understanding and unlocks a pitch delivery / Q&amp;A
+              analysis. Tone analysis runs only when a video is attached.
+            </p>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-ink-500">Transcript text</label>
+              <textarea
+                value={transcriptText}
+                onChange={(e) => setTranscriptText(e.target.value)}
+                placeholder="Paste the pitch / Q&A transcript here…"
+                rows={4}
+                className="input resize-y"
+              />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-ink-500">…or transcript file (.txt/.vtt/.srt)</label>
+                <input
+                  type="file"
+                  accept=".txt,.vtt,.srt"
+                  onChange={(e) => setTranscriptFile(e.target.files?.[0] ?? null)}
+                  className="block w-full text-xs text-ink-500 file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-ink-700 hover:file:bg-ink-200"
+                />
+                {transcriptFile && <p className="mt-1 truncate text-xs text-ink-400">{transcriptFile.name}</p>}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-ink-500">Pitch video (enables tone analysis)</label>
+                <input
+                  type="file"
+                  accept="video/*"
+                  onChange={(e) => setVideoFile(e.target.files?.[0] ?? null)}
+                  className="block w-full text-xs text-ink-500 file:mr-3 file:rounded-lg file:border-0 file:bg-ink-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-ink-700 hover:file:bg-ink-200"
+                />
+                {videoFile && <p className="mt-1 truncate text-xs text-ink-400">{videoFile.name}</p>}
+              </div>
+            </div>
+            <p className="text-xs text-ink-400">
+              Then choose your deck above — the recording is attached to that analysis. Video
+              auto-transcription needs an <code className="rounded bg-ink-100 px-1">OPENAI_API_KEY</code>;
+              otherwise also paste a transcript.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Stats */}
@@ -314,6 +394,12 @@ function DeckCard({
         <div className="min-w-0">
           <p className="truncate font-semibold text-ink-900">{title}</p>
           <p className="truncate text-xs text-ink-400">{d.filename}</p>
+          {(d.has_transcript || d.has_video) && (
+            <div className="mt-1 flex gap-1">
+              {d.has_transcript && <span className="chip bg-violet-50 text-violet-700">transcript</span>}
+              {d.has_video && <span className="chip bg-violet-50 text-violet-700">video</span>}
+            </div>
+          )}
         </div>
         {done && (
           <span className={`chip shrink-0 ring-1 ${meta.bg} ${meta.text} ${meta.ring}`}>{meta.label}</span>

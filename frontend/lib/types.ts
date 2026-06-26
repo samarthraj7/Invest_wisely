@@ -72,7 +72,28 @@ export interface Recommendation {
   rationale: string;
 }
 
+export interface QAExchange {
+  question: string;
+  answer: string;
+  assessment: string;
+  confidence: Confidence;
+}
+
+export interface PitchDelivery {
+  available: boolean;
+  source: string;
+  clarity: string;
+  structure: string;
+  handling_of_questions: string;
+  tone: string;
+  strengths: string[];
+  weaknesses: string[];
+  qa: QAExchange[];
+  notes: Claim[];
+}
+
 export interface InvestmentReport {
+  executive_summary?: string;
   company_snapshot: CompanySnapshot;
   team_analysis: TeamMember[];
   competitive_landscape: {
@@ -83,6 +104,7 @@ export interface InvestmentReport {
   red_flags: RedFlag[];
   diligence_questions: DiligenceQuestion[];
   valuation: Valuation;
+  delivery?: PitchDelivery;
   recommendation: Recommendation;
   analyst_note: string;
   warnings: string[];
@@ -97,6 +119,8 @@ export interface DeckListItem {
   error?: string;
   recommendation: string;
   risk_rating: string;
+  has_transcript?: boolean;
+  has_video?: boolean;
   created_at: string;
 }
 

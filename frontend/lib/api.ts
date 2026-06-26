@@ -16,9 +16,19 @@ export async function getDeck(id: string): Promise<DeckDetail> {
   return j(await fetch(`${API_BASE}/api/decks/${id}`, { cache: "no-store" }));
 }
 
-export async function uploadDeck(file: File): Promise<{ id: string }> {
+export interface PitchExtras {
+  transcriptText?: string;
+  transcriptFile?: File | null;
+  video?: File | null;
+}
+
+export async function uploadDeck(file: File, extras: PitchExtras = {}): Promise<{ id: string }> {
   const fd = new FormData();
   fd.append("file", file);
+  if (extras.transcriptText && extras.transcriptText.trim())
+    fd.append("transcript_text", extras.transcriptText.trim());
+  if (extras.transcriptFile) fd.append("transcript", extras.transcriptFile);
+  if (extras.video) fd.append("video", extras.video);
   return j(await fetch(`${API_BASE}/api/decks`, { method: "POST", body: fd }));
 }
 

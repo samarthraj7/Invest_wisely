@@ -4,8 +4,9 @@ from __future__ import annotations
 import shutil
 import uuid
 from pathlib import Path
+from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -33,7 +34,18 @@ REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 @app.on_event("startup")
 def _startup() -> None:
+    from .obs import logger, setup_logging
+
+    setup_logging()
     init_db()
+    logger.info(
+        "startup: llm=%s search=%s enrichment=%s model=%s ocr=%s",
+        settings.has_llm,
+        settings.has_search,
+        settings.has_enrichment,
+        settings.anthropic_model,
+        settings.ocr_engine,
+    )
 
 
 @app.get("/health")
@@ -52,6 +64,8 @@ def _process(deck_id: str, path: str) -> None:
         deck = s.get(Deck, deck_id)
         if not deck:
             return
+        transcript_text = deck.transcript_text
+        video_path = deck.video_path
 
         def on_stage(stage: str) -> None:
             with SessionLocal() as s2:
@@ -61,7 +75,12 @@ def _process(deck_id: str, path: str) -> None:
                     s2.commit()
 
         try:
-            result = run_pipeline(path, on_stage=on_stage)
+            result = run_pipeline(
+                path,
+                on_stage=on_stage,
+                transcript_text=transcript_text,
+                video_path=video_path,
+            )
             deck.report_json = result.report.model_dump(mode="json")
             deck.company_name = result.company_name
             deck.recommendation = result.report.recommendation.recommendation.value
@@ -73,37 +92,81 @@ def _process(deck_id: str, path: str) -> None:
         s.commit()
 
 
-def _create_and_run(filename: str, src_path: Path, bg: BackgroundTasks) -> dict:
+def _create_and_run(
+    filename: str,
+    src_path: Path,
+    bg: BackgroundTasks,
+    transcript_text: str | None = None,
+    video_path: str | None = None,
+) -> dict:
     deck_id = str(uuid.uuid4())
     with SessionLocal() as s:
-        s.add(Deck(id=deck_id, filename=filename, status="pending"))
+        s.add(Deck(
+            id=deck_id,
+            filename=filename,
+            status="pending",
+            transcript_text=transcript_text or None,
+            video_path=video_path or None,
+        ))
         s.commit()
     bg.add_task(_process, deck_id, str(src_path))
     return {"id": deck_id, "status": "pending"}
 
 
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024  # 30 MB
+MAX_VIDEO_BYTES = 500 * 1024 * 1024  # 500 MB
+MAX_TRANSCRIPT_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+async def _save_upload(up: UploadFile, dest: Path, max_bytes: int) -> int:
+    size = 0
+    with dest.open("wb") as f:
+        while chunk := await up.read(1024 * 1024):
+            size += len(chunk)
+            if size > max_bytes:
+                f.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(413, f"'{up.filename}' is too large.")
+            f.write(chunk)
+    return size
 
 
 @app.post("/api/decks")
-async def upload_deck(bg: BackgroundTasks, file: UploadFile = File(...)) -> dict:
+async def upload_deck(
+    bg: BackgroundTasks,
+    file: UploadFile = File(...),
+    transcript: Optional[UploadFile] = File(None),
+    transcript_text: Optional[str] = Form(None),
+    video: Optional[UploadFile] = File(None),
+) -> dict:
     if not file.filename or not file.filename.lower().endswith((".pdf", ".pptx", ".ppt")):
         raise HTTPException(400, "Upload a .pdf or .pptx file")
     deck_id = str(uuid.uuid4())
     dest = UPLOAD_DIR / f"{deck_id}_{file.filename}"
-    size = 0
-    with dest.open("wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            size += len(chunk)
-            if size > MAX_UPLOAD_BYTES:
-                f.close()
-                dest.unlink(missing_ok=True)
-                raise HTTPException(413, "Deck too large (max 30 MB).")
-            f.write(chunk)
+    size = await _save_upload(file, dest, MAX_UPLOAD_BYTES)
     if size == 0:
         dest.unlink(missing_ok=True)
         raise HTTPException(400, "Uploaded file is empty.")
-    return _create_and_run(file.filename, dest, bg)
+
+    # Optional pitch transcript: pasted text or an uploaded .txt/.vtt/.srt file.
+    final_transcript = (transcript_text or "").strip()
+    if transcript is not None and transcript.filename:
+        from .pipeline.transcript import parse_transcript_bytes
+
+        data = await transcript.read(MAX_TRANSCRIPT_BYTES + 1)
+        if len(data) > MAX_TRANSCRIPT_BYTES:
+            raise HTTPException(413, "Transcript file too large (max 5 MB).")
+        parsed = parse_transcript_bytes(transcript.filename, data)
+        final_transcript = (final_transcript + "\n" + parsed).strip() if final_transcript else parsed
+
+    # Optional pitch video (used for tone analysis + optional auto-transcription).
+    video_path: Optional[str] = None
+    if video is not None and video.filename:
+        vdest = UPLOAD_DIR / f"{deck_id}_video_{video.filename}"
+        await _save_upload(video, vdest, MAX_VIDEO_BYTES)
+        video_path = str(vdest)
+
+    return _create_and_run(file.filename, dest, bg, final_transcript or None, video_path)
 
 
 @app.post("/api/decks/demo")
@@ -139,6 +202,8 @@ def list_decks() -> list[dict]:
                 "error": (d.error or "")[:300],
                 "recommendation": d.recommendation,
                 "risk_rating": d.risk_rating,
+                "has_transcript": bool(d.transcript_text),
+                "has_video": bool(d.video_path),
                 "created_at": _iso_utc(d.created_at),
             }
             for d in rows
@@ -158,6 +223,8 @@ def get_deck(deck_id: str) -> dict:
             "status": d.status,
             "error": d.error,
             "report": d.report_json,
+            "has_transcript": bool(d.transcript_text),
+            "has_video": bool(d.video_path),
             "created_at": _iso_utc(d.created_at),
         }
 

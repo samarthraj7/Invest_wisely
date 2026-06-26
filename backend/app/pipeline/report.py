@@ -43,6 +43,11 @@ _TEMPLATE = Template(
 <ul style="margin:6px 0 0;padding-left:18px;font-size:13px;color:#92400e">
 {% for w in r.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>{% endif %}
 
+{% if r.executive_summary %}<div style="border-left:4px solid #6366f1;background:#eef2ff;
+  padding:12px 16px;margin-top:18px;border-radius:6px">
+<b style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#4f46e5">Consolidated summary</b>
+<p style="margin:6px 0 0;font-size:14px">{{ r.executive_summary }}</p></div>{% endif %}
+
 <h2>1 · Company snapshot</h2>
 {% for c in r.company_snapshot.deck_claims %}{{ claim(c) }}{% endfor %}
 
@@ -95,6 +100,21 @@ _TEMPLATE = Template(
  {{ r.recommendation.suggested_check_size }}</p>{% endif %}
 <p class="muted"><b>Named risk factors:</b></p>
 {% for c in r.recommendation.risk_factors %}{{ claim(c) }}{% endfor %}
+
+{% if r.delivery and r.delivery.available %}
+<h2>8 · Pitch delivery {% if r.delivery.source %}<span class="conf">({{ r.delivery.source }})</span>{% endif %}</h2>
+{% if r.delivery.clarity %}<p><b>Clarity:</b> {{ r.delivery.clarity }}</p>{% endif %}
+{% if r.delivery.structure %}<p><b>Structure:</b> {{ r.delivery.structure }}</p>{% endif %}
+{% if r.delivery.handling_of_questions %}<p><b>Handling of cross-questions:</b> {{ r.delivery.handling_of_questions }}</p>{% endif %}
+{% if r.delivery.tone %}<p><b>Tone (from video):</b> {{ r.delivery.tone }}</p>{% endif %}
+{% if r.delivery.strengths %}<p class="muted"><b>Delivery strengths:</b></p>
+<ul>{% for x in r.delivery.strengths %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+{% if r.delivery.weaknesses %}<p class="muted"><b>Delivery weaknesses:</b></p>
+<ul>{% for x in r.delivery.weaknesses %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+{% if r.delivery.qa %}<p class="muted"><b>Questions &amp; answers:</b></p>
+{% for q in r.delivery.qa %}<div class="claim"><b>Q:</b> {{ q.question }}<br><b>A:</b> {{ q.answer }}
+<div class="src">Assessment: {{ q.assessment }}<span class="conf">{{ q.confidence.value }}</span></div></div>{% endfor %}{% endif %}
+{% endif %}
 
 <div class="note">{{ r.analyst_note }}</div>
 </body></html>""",
@@ -157,6 +177,9 @@ def _export_docx(report: InvestmentReport, out_path: Path) -> tuple[Path, str]:
         doc.add_paragraph("MOCK MODE — add API keys for live research.")
     for w in r.warnings:
         doc.add_paragraph(f"Note: {w}")
+    if r.executive_summary:
+        doc.add_heading("Consolidated summary", level=1)
+        doc.add_paragraph(r.executive_summary)
 
     def claim_p(c) -> None:
         p = doc.add_paragraph(style="List Bullet")
@@ -221,6 +244,29 @@ def _export_docx(report: InvestmentReport, out_path: Path) -> tuple[Path, str]:
     doc.add_paragraph(rec.rationale)
     for c in rec.risk_factors:
         claim_p(c)
+
+    d = r.delivery
+    if d and d.available:
+        doc.add_heading(f"8 · Pitch delivery ({d.source})", level=1)
+        for label, val in (
+            ("Clarity", d.clarity),
+            ("Structure", d.structure),
+            ("Handling of cross-questions", d.handling_of_questions),
+            ("Tone (from video)", d.tone),
+        ):
+            if val:
+                doc.add_paragraph(f"{label}: {val}")
+        for label, items in (("Delivery strengths", d.strengths), ("Delivery weaknesses", d.weaknesses)):
+            if items:
+                doc.add_paragraph(label).runs[0].bold = True
+                for x in items:
+                    doc.add_paragraph(x, style="List Bullet")
+        if d.qa:
+            doc.add_paragraph("Questions & answers").runs[0].bold = True
+            for q in d.qa:
+                doc.add_paragraph(f"Q: {q.question}")
+                doc.add_paragraph(f"A: {q.answer}")
+                doc.add_paragraph(f"   Assessment: {q.assessment} ({q.confidence.value})")
 
     doc.add_paragraph(r.analyst_note)
 

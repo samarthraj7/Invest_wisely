@@ -31,16 +31,23 @@ Return JSON with this shape:
 """
 
 
-def understand_deck(deck: ParsedDeck) -> dict[str, Any]:
+def understand_deck(deck: ParsedDeck, transcript: str | None = None) -> dict[str, Any]:
     prompt = (
         f"{_SCHEMA_HINT}\n\nDECK FILENAME: {deck.filename}\n"
         f"TOTAL PAGES: {len(deck.slides)}  EMBEDDED IMAGES: {deck.total_images}\n\n"
         f"DECK CONTENT:\n{deck.full_text[:18000]}"
     )
+    if transcript:
+        prompt += (
+            "\n\n=== PITCH RECORDING TRANSCRIPT (spoken by the founders; use it to "
+            "understand the company more deeply — it often explains what the slides "
+            "only hint at) ===\n" + transcript[:12000]
+        )
     return get_llm().complete_json(
         system=_SYSTEM,
         prompt=prompt,
         mock=_mock_understanding(deck),
+        label="understanding",
     )
 
 

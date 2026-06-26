@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-sonnet-4-6"
     exa_api_key: str = ""
     proxycurl_api_key: str = ""
+    # Optional: enables auto-transcription of uploaded pitch videos via Whisper.
+    openai_api_key: str = ""
+    openai_transcribe_model: str = "whisper-1"
 
     allow_mock_mode: bool = True
     research_cache_ttl_days: int = 30
@@ -53,6 +56,10 @@ class Settings(BaseSettings):
     @property
     def has_enrichment(self) -> bool:
         return self._is_real(self.proxycurl_api_key)
+
+    @property
+    def has_openai(self) -> bool:
+        return self._is_real(self.openai_api_key)
 
     @property
     def storage_dir(self) -> Path:

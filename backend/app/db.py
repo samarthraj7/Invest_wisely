@@ -50,6 +50,9 @@ class Deck(Base):
     report_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     recommendation: Mapped[str] = mapped_column(String(32), default="")
     risk_rating: Mapped[str] = mapped_column(String(32), default="")
+    # Optional pitch-recording inputs.
+    transcript_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    video_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -65,3 +68,24 @@ class ResearchCache(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _migrate_sqlite()
+
+
+def _migrate_sqlite() -> None:
+    """Add columns introduced after the table was first created. SQLite supports
+    ADD COLUMN; create_all() won't alter existing tables, so we do it here."""
+    from sqlalchemy import inspect, text
+
+    try:
+        insp = inspect(engine)
+        existing = {c["name"] for c in insp.get_columns("decks")}
+    except Exception:
+        return
+    additions = {
+        "transcript_text": "TEXT",
+        "video_path": "VARCHAR(1024)",
+    }
+    with engine.begin() as conn:
+        for col, ddl in additions.items():
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE decks ADD COLUMN {col} {ddl}"))

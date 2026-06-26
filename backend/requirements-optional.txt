@@ -19,3 +19,8 @@ weasyprint==63.1
 # 2) Then install these Python packages:
 pytesseract==0.3.13
 Pillow==10.4.0
+
+# --- Optional: auto-transcribe uploaded pitch VIDEOS via OpenAI Whisper ---
+# Only needed if you set OPENAI_API_KEY and want to upload a video without also
+# supplying a text transcript. Without this, attach a transcript file/text.
+openai==1.51.0
