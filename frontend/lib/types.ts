@@ -103,6 +103,50 @@ export interface PitchDelivery {
   notes: Claim[];
 }
 
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: string;
+  detail: string;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  relation: string;
+}
+
+export interface KnowledgeGraph {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface ScoreFactor {
+  key: string;
+  name: string;
+  score: number;
+  weight: number;
+  rationale: string;
+}
+
+export interface RiskBreakdown {
+  legitimacy: string;
+  valuation: string;
+  revenue: string;
+  future_plan: string;
+  impact: string;
+}
+
+export interface InvestmentScore {
+  overall: number;
+  verdict: string;
+  factors: ScoreFactor[];
+  risk: RiskBreakdown;
+  rationale: string;
+  graph: KnowledgeGraph;
+  scored: boolean;
+}
+
 export interface InvestmentReport {
   executive_summary?: string;
   company_snapshot: CompanySnapshot;
@@ -116,6 +160,7 @@ export interface InvestmentReport {
   diligence_questions: DiligenceQuestion[];
   valuation: Valuation;
   delivery?: PitchDelivery;
+  score?: InvestmentScore;
   recommendation: Recommendation;
   analyst_note: string;
   warnings: string[];

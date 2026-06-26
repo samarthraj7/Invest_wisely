@@ -48,6 +48,31 @@ _TEMPLATE = Template(
 <b style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#4f46e5">Consolidated summary</b>
 <p style="margin:6px 0 0;font-size:14px">{{ r.executive_summary }}</p></div>{% endif %}
 
+{% if r.score and r.score.scored %}
+<div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-top:18px">
+ <div style="display:flex;align-items:baseline;gap:10px">
+  <span style="font-size:34px;font-weight:800;color:#0f172a">{{ r.score.overall }}<span style="font-size:16px;color:#94a3b8">/100</span></span>
+  <span class="pill" style="background:#eef2ff;color:#4338ca">{{ r.score.verdict }}</span>
+ </div>
+ {% if r.score.rationale %}<p style="font-size:13px;color:#475569;margin:8px 0 12px">{{ r.score.rationale }}</p>{% endif %}
+ {% for f in r.score.factors %}
+  <div style="margin:6px 0">
+   <div style="font-size:12px;color:#334155"><b>{{ f.name }}</b> — {{ f.score }}/100
+    <span class="conf">weight {{ (f.weight*100)|round|int }}%</span></div>
+   <div style="background:#e2e8f0;border-radius:5px;height:7px;margin:3px 0">
+    <div style="width:{{ f.score }}%;height:7px;border-radius:5px;background:#6366f1"></div></div>
+   {% if f.rationale %}<div class="src">{{ f.rationale }}</div>{% endif %}
+  </div>
+ {% endfor %}
+ <table style="margin-top:12px">
+  {% if r.score.risk.legitimacy %}<tr><th style="width:140px">Legitimacy</th><td>{{ r.score.risk.legitimacy }}</td></tr>{% endif %}
+  {% if r.score.risk.valuation %}<tr><th>Valuation</th><td>{{ r.score.risk.valuation }}</td></tr>{% endif %}
+  {% if r.score.risk.revenue %}<tr><th>Revenue</th><td>{{ r.score.risk.revenue }}</td></tr>{% endif %}
+  {% if r.score.risk.future_plan %}<tr><th>Future plan</th><td>{{ r.score.risk.future_plan }}</td></tr>{% endif %}
+  {% if r.score.risk.impact %}<tr><th>Overall impact</th><td>{{ r.score.risk.impact }}</td></tr>{% endif %}
+ </table>
+</div>{% endif %}
+
 <h2>1 · Company snapshot</h2>
 {% for c in r.company_snapshot.deck_claims %}{{ claim(c) }}{% endfor %}
 
@@ -190,6 +215,26 @@ def _export_docx(report: InvestmentReport, out_path: Path) -> tuple[Path, str]:
     if r.executive_summary:
         doc.add_heading("Consolidated summary", level=1)
         doc.add_paragraph(r.executive_summary)
+
+    sc = r.score
+    if sc and sc.scored:
+        doc.add_heading(f"Investment score: {sc.overall}/100 — {sc.verdict}", level=1)
+        if sc.rationale:
+            doc.add_paragraph(sc.rationale)
+        for f in sc.factors:
+            doc.add_paragraph(
+                f"{f.name}: {f.score}/100 (weight {round(f.weight * 100)}%) — {f.rationale}",
+                style="List Bullet",
+            )
+        for label, val in (
+            ("Legitimacy", sc.risk.legitimacy),
+            ("Valuation", sc.risk.valuation),
+            ("Revenue", sc.risk.revenue),
+            ("Future plan", sc.risk.future_plan),
+            ("Overall impact", sc.risk.impact),
+        ):
+            if val:
+                doc.add_paragraph(f"Risk · {label}: {val}")
 
     def claim_p(c) -> None:
         p = doc.add_paragraph(style="List Bullet")

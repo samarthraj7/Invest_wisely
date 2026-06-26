@@ -6,7 +6,7 @@ import { deleteDeck, health, listDecks, runDemo, uploadDeck } from "@/lib/api";
 import type { DeckListItem } from "@/lib/types";
 import { Banner, recMeta } from "@/components/ui";
 
-const STAGES = ["pending", "parsing", "transcribing", "ocr", "understanding", "extracting", "researching", "analyzing", "delivery"];
+const STAGES = ["pending", "parsing", "transcribing", "ocr", "understanding", "extracting", "researching", "analyzing", "delivery", "scoring"];
 const STAGE_LABEL: Record<string, string> = {
   pending: "Queued",
   parsing: "Parsing deck",
@@ -17,6 +17,7 @@ const STAGE_LABEL: Record<string, string> = {
   researching: "Researching web",
   analyzing: "Writing memo",
   delivery: "Analyzing delivery",
+  scoring: "Scoring & graph",
 };
 
 function progressPct(status: string) {

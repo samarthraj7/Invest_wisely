@@ -7,6 +7,7 @@ import type { ExportFormat } from "@/lib/api";
 import type { DeckDetail } from "@/lib/types";
 import type { Claim, TeamMember } from "@/lib/types";
 import { Banner, ClaimList, ConfidenceBadge, ConfidenceMark, recMeta, Section, SEV_STYLE } from "@/components/ui";
+import { FactorBars, KnowledgeGraphView, RiskBreakdownView, ScoreGauge } from "@/components/score";
 
 const NAV = [
   ["snapshot", "Company snapshot"],
@@ -56,6 +57,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
   const rec = r.recommendation;
   const meta = recMeta(rec.recommendation);
   const hasDelivery = !!(r.delivery && r.delivery.available);
+  const hasScore = !!(r.score && r.score.scored);
   const sevCounts = r.red_flags.reduce<Record<string, number>>((a, f) => {
     a[f.severity] = (a[f.severity] || 0) + 1;
     return a;
@@ -148,10 +150,51 @@ export default function ReportPage({ params }: { params: { id: string } }) {
         </div>
       )}
 
+      {/* Investment score + knowledge graph */}
+      {hasScore && r.score && (
+        <div id="score" className="card scroll-mt-24 p-6">
+          <h2 className="section-title">
+            <span className="grid h-7 w-7 place-items-center rounded-lg gradient-brand text-xs font-bold text-white">
+              ★
+            </span>
+            Investment score &amp; knowledge graph
+          </h2>
+
+          <div className="mt-4 grid gap-6 lg:grid-cols-[auto_1fr]">
+            <div className="flex flex-col items-center gap-2 lg:w-44">
+              <ScoreGauge score={r.score.overall} />
+              <span className="chip bg-brand-50 text-brand-700">{r.score.verdict}</span>
+              {r.score.rationale && (
+                <p className="text-center text-[12px] leading-relaxed text-ink-500">{r.score.rationale}</p>
+              )}
+            </div>
+            <FactorBars factors={r.score.factors} />
+          </div>
+
+          <p className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Risk breakdown</p>
+          <RiskBreakdownView risk={r.score.risk} />
+
+          {r.score.graph.nodes.length > 0 && (
+            <>
+              <p className="mt-6 mb-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
+                Entity knowledge graph
+              </p>
+              <KnowledgeGraphView graph={r.score.graph} />
+            </>
+          )}
+        </div>
+      )}
+
       {/* Two-column: sticky nav + content */}
       <div className="grid gap-6 lg:grid-cols-[200px_1fr]">
         <nav className="hidden lg:block print:hidden">
           <div className="sticky top-24 space-y-1">
+            {hasScore && (
+              <a href="#score" className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 transition hover:bg-brand-50">
+                <span className="text-xs">★</span>
+                Score &amp; graph
+              </a>
+            )}
             {NAV.map(([id, label], i) => (
               <a key={id} href={`#${id}`} className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-ink-500 transition hover:bg-ink-50 hover:text-ink-900">
                 <span className="text-xs font-semibold text-ink-300">{i + 1}</span>

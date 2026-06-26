@@ -14,7 +14,7 @@ from typing import Callable, Optional
 from ..config import get_settings
 from ..obs import logger
 from ..schemas import InvestmentReport
-from . import analysis, deck_understanding, delivery, entities, ocr, parse, research, transcript
+from . import analysis, deck_understanding, delivery, entities, ocr, parse, research, scoring, transcript
 
 StageCb = Optional[Callable[[str], None]]
 
@@ -111,6 +111,9 @@ def run_pipeline(
     if pitch_transcript:
         stage("delivery")
         report.delivery = delivery.analyze_delivery(pitch_transcript, has_video=has_video)
+
+    stage("scoring")
+    report.score = scoring.compute_score(report, understanding, research_bundle)
 
     # If a live LLM call failed mid-run, surface why (billing, etc.) at the top.
     from ..clients.llm import get_llm

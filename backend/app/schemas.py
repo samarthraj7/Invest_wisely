@@ -221,6 +221,54 @@ class FinalRecommendation(_SafeModel):
     rationale: str = ""
 
 
+class GraphNode(_SafeModel):
+    id: str = ""
+    label: str = ""
+    type: str = Field(default="", description="company|founder|market|competitor|valuation|traction|risk")
+    detail: str = ""
+
+
+class GraphEdge(_SafeModel):
+    source: str = ""
+    target: str = ""
+    relation: str = ""
+
+
+class KnowledgeGraph(_SafeModel):
+    """Entities linked to each other; the visual backbone of the final judgement."""
+    nodes: List[GraphNode] = Field(default_factory=list)
+    edges: List[GraphEdge] = Field(default_factory=list)
+
+
+class ScoreFactor(_SafeModel):
+    key: str = ""
+    name: str = ""
+    score: int = Field(default=0, description="0-100 for this dimension")
+    weight: float = Field(default=0.0, description="0-1 weight in the overall score")
+    rationale: str = ""
+
+
+class RiskBreakdown(_SafeModel):
+    """Why the risk rating is what it is, decomposed along the axes that matter."""
+    legitimacy: str = Field(default="", description="How verifiable/real the company, team and claims are")
+    valuation: str = Field(default="", description="Is the ask/valuation justified by evidence?")
+    revenue: str = Field(default="", description="Revenue/traction reality and durability")
+    future_plan: str = Field(default="", description="Credibility of the roadmap and use of funds")
+    impact: str = Field(default="", description="How these combine into the overall risk and what would change it")
+
+
+class InvestmentScore(_SafeModel):
+    """A transparent 0-100 score: a weighted blend of factor scores, plus the risk
+    decomposition and the entity knowledge graph that supports the call."""
+    overall: int = Field(default=0, description="0-100 weighted investment score")
+    verdict: str = Field(default="", description="Short label derived from the score")
+    factors: List[ScoreFactor] = Field(default_factory=list)
+    risk: RiskBreakdown = Field(default_factory=RiskBreakdown)
+    rationale: str = Field(default="", description="2-3 sentence justification of the overall score")
+    graph: KnowledgeGraph = Field(default_factory=KnowledgeGraph)
+    scored: bool = Field(default=False, description="False when scoring did not run (mock/degraded)")
+
+
 class InvestmentReport(_SafeModel):
     """The full report. Mirrors the target structure in the brief."""
     executive_summary: str = Field(
@@ -235,6 +283,7 @@ class InvestmentReport(_SafeModel):
     diligence_questions: List[DiligenceQuestion] = Field(default_factory=list)
     valuation: ValuationAnalysis
     delivery: PitchDelivery = Field(default_factory=PitchDelivery)
+    score: InvestmentScore = Field(default_factory=InvestmentScore)
     recommendation: FinalRecommendation
     analyst_note: str = Field(
         default="Directional analyst support. Augments, not replaces, partner judgment.",
