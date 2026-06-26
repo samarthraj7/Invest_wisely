@@ -11,6 +11,7 @@ import json
 from typing import Any
 
 from ..clients.llm import get_llm
+from ..obs import logger
 from ..schemas import InvestmentReport
 from .entities import Entities
 
@@ -53,6 +54,16 @@ RECOMMENDATION (weigh many factors before concluding)
   single factor. State the load-bearing reasons.
 - recommendation = invest | pass | more_diligence; include suggested_check_size if invest,
   a risk_rating, and named risk_factors (each sourced).
+
+CONSOLIDATED SUMMARY
+- executive_summary: a 3-6 sentence partner-facing synthesis — what the company does, the
+  strongest reason to be interested, the biggest risk, and the bottom-line call. This must be
+  consistent with the detailed sections.
+
+OUTPUT BUDGET (so the JSON is COMPLETE, never truncated)
+- Be concise: 1-2 sentences per claim. Prefer fewer, higher-signal items.
+- Aim for 3-6 red flags, 4-6 diligence questions, 2-4 strengths/gaps per key person.
+- Return the FULL valid JSON object; do not get cut off mid-structure.
 """
 
 
@@ -62,6 +73,7 @@ _SCHEMA_HINT = """Return ONE JSON object with EXACTLY these keys. A "claim" obje
 {claim, source_type:"deck"|"web"|"enrichment"|"inference", source_ref, confidence:"high"|"medium"|"low"|"inconclusive"}.
 
 {
+  "executive_summary": "3-6 sentence consolidated take (what they do, strongest reason to be interested, biggest risk, bottom-line call)",
   "company_snapshot": {name, one_liner, sector, stage, location, ask, deck_claims:[claim]},
   "team_analysis": [{name, title, linkedin_url, deck_claims:[claim],
                      researched_background:[claim], strengths:[claim],
@@ -157,11 +169,14 @@ def analyze(
         system=_SYSTEM,
         prompt=prompt,
         mock=_mock_report(entities, understanding, research),
-        max_tokens=6000,
+        max_tokens=8000,
+        label="analysis",
     )
     try:
         report = InvestmentReport.model_validate(raw)
-    except Exception:
+    except Exception as exc:
+        logger.error("[analysis] schema validation failed -> placeholder (%s: %s)",
+                     type(exc).__name__, str(exc)[:200])
         report = InvestmentReport.model_validate(
             _mock_report(entities, understanding, research)
         )
@@ -233,6 +248,11 @@ def _mock_report(
     }
 
     return {
+        "executive_summary": (
+            f"{name}: automated analysis did not run for this deck, so this is a structural "
+            "placeholder built only from the uploaded deck. See the note at the top of the "
+            "report for why, then re-run for a full assessment."
+        ),
         "company_snapshot": {
             "name": name,
             "one_liner": company.get("one_liner") or entities.company_one_liner,

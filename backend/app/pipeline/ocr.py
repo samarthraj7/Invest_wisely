@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from ..config import get_settings
+from ..obs import logger, preview
 from .parse import IMAGE_ONLY_WARNING, ParsedDeck
 
 ProgressCb = Optional[Callable[[int, int], None]]
@@ -55,8 +56,11 @@ def maybe_run_ocr(deck: ParsedDeck, path: str | Path, on_progress: ProgressCb = 
 
     engine = _select_engine(settings.ocr_engine)
     info["engine"] = engine
+    logger.info("OCR: %d image-only page(s) detected; engine=%s (pref=%s)",
+                len(cands), engine, settings.ocr_engine)
     if engine is None:
         # No usable engine; keep the image-only warning and add a hint.
+        logger.warning("OCR: no usable engine. Set ANTHROPIC_API_KEY (vision) or install Tesseract.")
         deck.warnings.append(
             "OCR was skipped: no OCR engine available. Set ANTHROPIC_API_KEY for "
             "vision OCR, or install Tesseract for local OCR (see README)."
@@ -71,15 +75,22 @@ def maybe_run_ocr(deck: ParsedDeck, path: str | Path, on_progress: ProgressCb = 
     for n, (idx, png) in enumerate(zip(capped, images), start=1):
         if on_progress:
             on_progress(n, len(capped))
+        page_no = deck.slides[idx].page
         if png is None:
+            logger.warning("OCR p.%d: could not render page image", page_no)
             continue
         text = _ocr_one(png, engine)
-        if text and len(text.strip()) >= settings.ocr_min_chars_per_page:
+        ok = bool(text) and len(text.strip()) >= settings.ocr_min_chars_per_page
+        logger.info("OCR p.%d (%s, %d chars)%s: %s",
+                    page_no, engine, len(text or ""),
+                    "" if ok else "  [too little -> ignored]", preview(text))
+        if ok:
             deck.slides[idx].text = text.strip()
             deck.slides[idx].ocr = True
             recovered += 1
 
     info["recovered_pages"] = recovered
+    logger.info("OCR: recovered text on %d/%d page(s)", recovered, len(capped))
     _update_warnings(deck, engine, recovered, len(cands), settings.ocr_max_pages)
     return info
 

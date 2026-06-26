@@ -30,6 +30,9 @@ def main() -> None:
     ap.add_argument("--export", action="store_true", help="Write an HTML/PDF memo")
     args = ap.parse_args()
 
+    from app.obs import setup_logging
+
+    setup_logging()
     init_db()
     settings = get_settings()
     mock = not (settings.has_llm and settings.has_search)
@@ -55,6 +58,8 @@ def main() -> None:
     else:
         rec = r.recommendation
         print(f"\n  COMPANY:  {r.company_snapshot.name} — {r.company_snapshot.one_liner}")
+        if r.executive_summary:
+            print(f"\n  SUMMARY:  {r.executive_summary}")
         print(f"  ASK:      {r.company_snapshot.ask}")
         print(f"  VAL RANGE:{r.valuation.range_low} – {r.valuation.range_high}")
         print(f"\n  RED FLAGS ({len(r.red_flags)}):")

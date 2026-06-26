@@ -12,6 +12,7 @@ import time
 from typing import Any, Optional
 
 from ..config import get_settings
+from ..obs import logger
 
 _MAX_RETRIES = 2
 _BASE_DELAY_S = 1.0
@@ -56,10 +57,15 @@ class LLMClient:
         prompt: str,
         mock: dict[str, Any],
         max_tokens: int = 4096,
+        label: str = "llm",
     ) -> dict[str, Any]:
         """Return a JSON object from the model, or `mock` when unavailable."""
         if not self.live:
+            logger.warning("[%s] LLM not live (no/placeholder API key) -> using placeholder", label)
             return mock
+
+        logger.info("[%s] calling %s (prompt ~%d chars, max_tokens=%d)...",
+                    label, self.settings.anthropic_model, len(prompt), max_tokens)
 
         def _attempt() -> str:
             msg = self._client.messages.create(  # type: ignore[union-attr]
@@ -68,6 +74,10 @@ class LLMClient:
                 system=system + "\n\nRespond with a single valid JSON object and nothing else.",
                 messages=[{"role": "user", "content": prompt}],
             )
+            u = getattr(msg, "usage", None)
+            if u is not None:
+                logger.info("[%s] tokens in=%s out=%s", label,
+                            getattr(u, "input_tokens", "?"), getattr(u, "output_tokens", "?"))
             return "".join(
                 b.text for b in msg.content if getattr(b, "type", "") == "text"
             )
@@ -77,15 +87,25 @@ class LLMClient:
         while True:
             try:
                 text = _attempt()
-                return _extract_json(text, fallback=mock)
-            except retriable:  # transient -> backoff + retry
+                result = _extract_json(text, fallback=mock)
+                if result is mock:
+                    logger.error("[%s] response was not valid JSON -> using placeholder. Raw head: %s",
+                                 label, (text or "")[:200])
+                else:
+                    logger.info("[%s] parsed JSON OK (%d top-level keys)", label, len(result))
+                return result
+            except retriable as exc:  # transient -> backoff + retry
                 attempt += 1
+                logger.warning("[%s] transient error (%s), retry %d/%d",
+                               label, type(exc).__name__, attempt, _MAX_RETRIES)
                 if attempt > _MAX_RETRIES:
                     self._mark_degraded("Anthropic temporarily unavailable (rate limit / outage).")
                     return mock
                 time.sleep(_BASE_DELAY_S * (2 ** (attempt - 1)))
             except Exception as exc:  # permanent (billing, auth, bad request) -> fail fast
-                self._mark_degraded(_clean_error(exc))
+                reason = _clean_error(exc)
+                logger.error("[%s] LLM call FAILED (%s): %s", label, type(exc).__name__, reason)
+                self._mark_degraded(reason)
                 return mock
 
     def ocr_image(self, image_bytes: bytes, media_type: str = "image/png") -> str:
@@ -138,14 +158,20 @@ class LLMClient:
             except retriable:
                 attempt += 1
                 if attempt > _MAX_RETRIES:
-                    self._mark_degraded("Anthropic temporarily unavailable (rate limit / outage).")
+                    # OCR is best-effort and independent: a failed page must NOT
+                    # mark the whole client degraded (which would force the
+                    # analysis to the placeholder). Just skip this page.
+                    logger.warning("[ocr] vision call rate-limited/unavailable; skipping page")
                     return ""
                 time.sleep(_BASE_DELAY_S * (2 ** (attempt - 1)))
             except Exception as exc:  # noqa: BLE001 - OCR must never crash the run
-                self._mark_degraded(_clean_error(exc))
+                logger.warning("[ocr] vision call failed (%s): %s",
+                               type(exc).__name__, _clean_error(exc))
                 return ""
 
     def _mark_degraded(self, reason: str) -> None:
+        if not self.degraded:
+            logger.error("LLM degraded for the rest of this run: %s", reason)
         self.degraded = True
         self.last_error = reason
 
