@@ -1,24 +1,24 @@
 import type { Claim, Confidence, Severity } from "@/lib/types";
 
-const CONF_STYLE: Record<Confidence, string> = {
-  high: "bg-emerald-50 text-emerald-700",
-  medium: "bg-amber-50 text-amber-700",
-  low: "bg-orange-50 text-orange-700",
-  inconclusive: "bg-ink-100 text-ink-500",
+const CONF_DOT: Record<Confidence, string> = {
+  high: "bg-emerald-500",
+  medium: "bg-amber-500",
+  low: "bg-orange-500",
+  inconclusive: "bg-ink-300",
 };
 
-const SRC_STYLE: Record<string, string> = {
-  deck: "bg-brand-50 text-brand-700",
-  web: "bg-sky-50 text-sky-700",
-  enrichment: "bg-violet-400/10 text-violet-600",
-  inference: "bg-ink-100 text-ink-500",
+const SRC_LABEL: Record<string, string> = {
+  deck: "deck",
+  web: "web",
+  enrichment: "profile",
+  inference: "inferred",
 };
 
-export const SEV_STYLE: Record<Severity, { dot: string; text: string; bg: string }> = {
-  critical: { dot: "bg-red-600", text: "text-red-700", bg: "bg-red-50 border-red-200" },
-  high: { dot: "bg-red-500", text: "text-red-600", bg: "bg-red-50/70 border-red-200" },
-  medium: { dot: "bg-amber-500", text: "text-amber-700", bg: "bg-amber-50 border-amber-200" },
-  low: { dot: "bg-lime-500", text: "text-lime-700", bg: "bg-lime-50 border-lime-200" },
+export const SEV_STYLE: Record<Severity, { dot: string; text: string; bg: string; accent: string }> = {
+  critical: { dot: "bg-red-600", text: "text-red-700", bg: "bg-red-50 border-red-200", accent: "border-red-500" },
+  high: { dot: "bg-red-500", text: "text-red-600", bg: "bg-red-50/70 border-red-200", accent: "border-red-400" },
+  medium: { dot: "bg-amber-500", text: "text-amber-700", bg: "bg-amber-50 border-amber-200", accent: "border-amber-400" },
+  low: { dot: "bg-lime-500", text: "text-lime-700", bg: "bg-lime-50 border-lime-200", accent: "border-lime-400" },
 };
 
 export const REC_META: Record<string, { label: string; ring: string; bg: string; text: string; bar: string }> = {
@@ -35,30 +35,75 @@ function isUrl(s: string) {
   return s.startsWith("http://") || s.startsWith("https://");
 }
 
-export function SourceTag({ claim }: { claim: Claim }) {
+/** A subtle, inline confidence marker — a small colored dot + word, placed at the
+ *  END of a point. Never a filled block. */
+export function ConfidenceMark({ c, label }: { c: Confidence; label?: string }) {
   return (
-    <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
-      <span className={`chip ${SRC_STYLE[claim.source_type] ?? "bg-ink-100 text-ink-500"}`}>
-        {claim.source_type}
-      </span>
-      {isUrl(claim.source_ref) ? (
-        <a href={claim.source_ref} target="_blank" rel="noreferrer" className="text-xs text-brand-600 underline decoration-dotted underline-offset-2 hover:text-brand-700">
-          {claim.source_ref.replace(/^https?:\/\//, "").slice(0, 42)}
-        </a>
-      ) : (
-        <span className="text-xs font-medium text-ink-400">{claim.source_ref}</span>
-      )}
-      <span className={`chip ${CONF_STYLE[claim.confidence]}`}>{claim.confidence}</span>
+    <span
+      className="ml-1.5 inline-flex items-baseline gap-1 align-baseline whitespace-nowrap text-[11px] font-medium text-ink-400"
+      title={`Confidence: ${c}`}
+    >
+      <span className={`inline-block h-1.5 w-1.5 translate-y-[-1px] rounded-full ${CONF_DOT[c]}`} />
+      {label ? `${label}: ${c}` : c}
     </span>
   );
 }
 
+/** The provenance citation, rendered as quiet trailing text (source · link). */
+function SourceCite({ claim }: { claim: Claim }) {
+  if (!claim.source_ref) return null;
+  const src = SRC_LABEL[claim.source_type] ?? claim.source_type;
+  return (
+    <span className="ml-1.5 inline whitespace-nowrap text-[11px] text-ink-300">
+      {isUrl(claim.source_ref) ? (
+        <a
+          href={claim.source_ref}
+          target="_blank"
+          rel="noreferrer"
+          className="text-brand-500/80 underline decoration-dotted underline-offset-2 hover:text-brand-600"
+        >
+          {src}↗
+        </a>
+      ) : (
+        <span>{claim.source_ref}</span>
+      )}
+    </span>
+  );
+}
+
+/** A single point: bullet dot · text · trailing citation · trailing confidence. */
 export function ClaimRow({ claim }: { claim: Claim }) {
   return (
-    <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-4 py-3 transition hover:border-ink-200">
-      <p className="text-sm leading-relaxed text-ink-800">{claim.claim}</p>
-      <SourceTag claim={claim} />
-    </div>
+    <li className="group flex gap-2.5">
+      <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-ink-200 transition group-hover:bg-brand-400" />
+      <p className="text-[13.5px] leading-relaxed text-ink-700">
+        {claim.claim}
+        <SourceCite claim={claim} />
+        <ConfidenceMark c={claim.confidence} />
+      </p>
+    </li>
+  );
+}
+
+/** Renders an array of claims as a tight, clean bullet list. */
+export function ClaimList({ claims }: { claims: Claim[] }) {
+  if (!claims || claims.length === 0) return null;
+  return (
+    <ul className="space-y-1.5">
+      {claims.map((c, i) => (
+        <ClaimRow key={i} claim={c} />
+      ))}
+    </ul>
+  );
+}
+
+// Back-compat: a few call sites still render <SourceTag/> on their own line.
+export function SourceTag({ claim }: { claim: Claim }) {
+  return (
+    <span className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-300">
+      <SourceCite claim={claim} />
+      <ConfidenceMark c={claim.confidence} />
+    </span>
   );
 }
 
@@ -87,7 +132,7 @@ export function Section({
 }
 
 export function ConfidenceBadge({ c }: { c: Confidence }) {
-  return <span className={`chip ${CONF_STYLE[c]}`}>research: {c}</span>;
+  return <ConfidenceMark c={c} label="research" />;
 }
 
 type BannerKind = "warning" | "info" | "error";

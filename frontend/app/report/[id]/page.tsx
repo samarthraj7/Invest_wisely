@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { exportUrl, getDeck } from "@/lib/api";
 import type { ExportFormat } from "@/lib/api";
 import type { DeckDetail } from "@/lib/types";
-import { Banner, ClaimRow, ConfidenceBadge, recMeta, Section, SEV_STYLE, SourceTag } from "@/components/ui";
+import type { Claim, TeamMember } from "@/lib/types";
+import { Banner, ClaimList, ConfidenceBadge, ConfidenceMark, recMeta, Section, SEV_STYLE } from "@/components/ui";
 
 const NAV = [
   ["snapshot", "Company snapshot"],
@@ -171,112 +172,60 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             {s.deck_claims.length === 0 ? (
               <p className="text-sm text-ink-400">No explicit claims extracted.</p>
             ) : (
-              s.deck_claims.map((c, i) => <ClaimRow key={i} claim={c} />)
+              <ClaimList claims={s.deck_claims} />
             )}
           </Section>
 
           <Section id="team" n={2} title="Team analysis">
-            {r.team_analysis.map((m, i) => (
-              <div key={i} className="rounded-xl border border-ink-100 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="font-semibold text-ink-900">{m.name}</p>
-                    <p className="text-xs text-ink-400">{m.title}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {m.research_confidence === "inconclusive" && (
-                      <span className="chip bg-orange-50 text-orange-700">not found online</span>
-                    )}
-                    <ConfidenceBadge c={m.research_confidence} />
-                  </div>
-                </div>
-                <div className="mt-3 space-y-3">
-                  {(m.researched_background?.length ?? 0) > 0 && (
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-400">
-                        Background &amp; experience
-                      </p>
-                      <div className="space-y-2">
-                        {m.researched_background.map((c, k) => (
-                          <ClaimRow key={`b${k}`} claim={c} />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {(m.strengths?.length ?? 0) > 0 &&
-                    m.strengths.map((c, k) => (
-                      <div key={`s${k}`} className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Strength</p>
-                        <p className="mt-1 text-sm text-ink-800">{c.claim}</p>
-                        <SourceTag claim={c} />
-                      </div>
-                    ))}
-
-                  {(m.founder_market_fit?.length ?? 0) > 0 &&
-                    m.founder_market_fit.map((c, k) => (
-                      <div key={`f${k}`} className="rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">Founder–market fit</p>
-                        <p className="mt-1 text-sm text-ink-800">{c.claim}</p>
-                        <SourceTag claim={c} />
-                      </div>
-                    ))}
-
-                  {(m.gaps_vs_venture?.length ?? 0) > 0 &&
-                    m.gaps_vs_venture.map((c, k) => (
-                      <div key={`g${k}`} className="rounded-xl border border-orange-200 bg-orange-50/60 px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-orange-600">Gap vs. venture</p>
-                        <p className="mt-1 text-sm text-ink-800">{c.claim}</p>
-                        <SourceTag claim={c} />
-                      </div>
-                    ))}
-                </div>
-              </div>
-            ))}
+            <div className="space-y-4">
+              {r.team_analysis.map((m, i) => (
+                <TeamCard key={i} m={m} />
+              ))}
+            </div>
           </Section>
 
           <Section id="competition" n={3} title="Competitive landscape">
             <div className="grid gap-2 sm:grid-cols-2">
               {r.competitive_landscape.named_in_deck.map((c, i) => (
-                <div key={`n${i}`} className="rounded-xl border border-ink-100 px-4 py-3">
-                  <p className="text-sm font-semibold text-ink-900">
-                    {c.name} <span className="chip bg-brand-50 text-brand-700">{c.relationship}</span>
-                  </p>
-                  <SourceTag claim={c.note} />
-                </div>
+                <CompetitorCard key={`n${i}`} c={c} tag="named in deck" tone="bg-brand-50 text-brand-700" />
               ))}
               {r.competitive_landscape.discovered.map((c, i) => (
-                <div key={`d${i}`} className="rounded-xl border border-ink-100 px-4 py-3">
-                  <p className="text-sm font-semibold text-ink-900">
-                    {c.name} <span className="chip bg-sky-50 text-sky-700">discovered</span>
-                  </p>
-                  <SourceTag claim={c.note} />
-                </div>
+                <CompetitorCard key={`d${i}`} c={c} tag="discovered" tone="bg-sky-50 text-sky-700" />
               ))}
             </div>
-            <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-ink-400">Differentiation check</p>
-            {r.competitive_landscape.differentiation_assessment.map((c, i) => (
-              <ClaimRow key={i} claim={c} />
-            ))}
+            {r.competitive_landscape.differentiation_assessment.length > 0 && (
+              <div className="pt-1">
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">Differentiation check</p>
+                <ClaimList claims={r.competitive_landscape.differentiation_assessment} />
+              </div>
+            )}
           </Section>
 
           <Section id="flags" n={4} title="Red flags">
-            {[...r.red_flags]
-              .sort((a, b) => sevRank(a.severity) - sevRank(b.severity))
-              .map((f, i) => {
-                const st = SEV_STYLE[f.severity];
-                return (
-                  <div key={i} className={`rounded-xl border px-4 py-3 ${st.bg}`}>
-                    <div className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${st.dot}`} />
-                      <span className={`text-xs font-bold uppercase ${st.text}`}>{f.severity}</span>
-                      <span className="text-sm font-semibold text-ink-900">{f.title}</span>
-                    </div>
-                    <p className="mt-1.5 text-sm text-ink-700">{f.reasoning.claim}</p>
-                    <SourceTag claim={f.reasoning} />
-                  </div>
-                );
-              })}
+            {r.red_flags.length === 0 ? (
+              <p className="text-sm text-ink-400">No material red flags were surfaced.</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {[...r.red_flags]
+                  .sort((a, b) => sevRank(a.severity) - sevRank(b.severity))
+                  .map((f, i) => {
+                    const st = SEV_STYLE[f.severity];
+                    return (
+                      <li key={i} className={`rounded-xl border-l-2 bg-ink-50/40 py-2 pl-3 pr-3 ${st.accent}`}>
+                        <div className="flex items-center gap-2">
+                          <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
+                          <span className={`text-[11px] font-bold uppercase tracking-wide ${st.text}`}>{f.severity}</span>
+                          <span className="text-sm font-semibold text-ink-900">{f.title}</span>
+                        </div>
+                        <p className="mt-1 text-[13.5px] leading-relaxed text-ink-700">
+                          {f.reasoning.claim}
+                          <ConfidenceMark c={f.reasoning.confidence} />
+                        </p>
+                      </li>
+                    );
+                  })}
+              </ul>
+            )}
           </Section>
 
           <Section id="diligence" n={5} title="Suggested diligence questions">
@@ -323,17 +272,22 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                 </table>
               </div>
             )}
-            <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">Assumptions</p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-ink-700">
-                {r.valuation.assumptions.map((a, i) => (
-                  <li key={i}>{a}</li>
-                ))}
-              </ul>
-            </div>
-            {r.valuation.ask_vs_comps.map((c, i) => (
-              <ClaimRow key={i} claim={c} />
-            ))}
+            {r.valuation.assumptions.length > 0 && (
+              <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">Assumptions</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[13.5px] text-ink-700">
+                  {r.valuation.assumptions.map((a, i) => (
+                    <li key={i}>{a}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {r.valuation.ask_vs_comps.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">Ask vs. comps</p>
+                <ClaimList claims={r.valuation.ask_vs_comps} />
+              </div>
+            )}
           </Section>
 
           <Section id="recommendation" n={7} title="Recommendation">
@@ -349,10 +303,12 @@ export default function ReportPage({ params }: { params: { id: string } }) {
               </div>
               <p className="mt-3 text-sm text-ink-700">{rec.rationale}</p>
             </div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">Named risk factors</p>
-            {rec.risk_factors.map((c, i) => (
-              <ClaimRow key={i} claim={c} />
-            ))}
+            {rec.risk_factors.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">Named risk factors</p>
+                <ClaimList claims={rec.risk_factors} />
+              </div>
+            )}
           </Section>
 
           {hasDelivery && r.delivery && (
@@ -398,9 +354,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                       <p className="text-sm font-medium text-ink-900">Q. {q.question}</p>
                       {q.answer && <p className="mt-1 text-sm text-ink-600"><span className="font-medium text-ink-500">A.</span> {q.answer}</p>}
                       {q.assessment && (
-                        <p className="mt-2 flex items-start gap-2 text-xs text-ink-500">
-                          <span className="chip bg-ink-100 text-ink-600">{q.confidence}</span>
-                          <span>{q.assessment}</span>
+                        <p className="mt-2 text-xs leading-relaxed text-ink-500">
+                          {q.assessment}
+                          <ConfidenceMark c={q.confidence} />
                         </p>
                       )}
                     </div>
@@ -422,6 +378,130 @@ function HeroStat({ label, value }: { label: string; value: React.ReactNode }) {
     <div className="px-4 py-3">
       <p className="text-[10px] uppercase tracking-wider text-ink-400">{label}</p>
       <div className="mt-0.5 text-sm font-semibold text-ink-900">{value}</div>
+    </div>
+  );
+}
+
+function CompetitorCard({
+  c,
+  tag,
+  tone,
+}: {
+  c: { name: string; relationship: string; note: Claim };
+  tag: string;
+  tone: string;
+}) {
+  return (
+    <div className="rounded-xl border border-ink-100 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm font-semibold text-ink-900">{c.name}</p>
+        {c.relationship && <span className="chip bg-ink-100 text-ink-500">{c.relationship}</span>}
+        <span className={`chip ${tone}`}>{tag}</span>
+      </div>
+      {c.note?.claim && (
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-700">
+          {c.note.claim}
+          <ConfidenceMark c={c.note.confidence} />
+        </p>
+      )}
+    </div>
+  );
+}
+
+function qualityTone(q: string): string | undefined {
+  const v = (q || "").toLowerCase();
+  if (v === "substantive") return "border-emerald-200 bg-emerald-50/60";
+  if (v === "trivial") return "border-orange-200 bg-orange-50/60";
+  if (v === "mixed") return "border-amber-200 bg-amber-50/60";
+  return undefined;
+}
+
+function CredStat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs ${tone ?? "border-ink-100 bg-white"}`}>
+      <span className="font-semibold text-ink-900">{value}</span>
+      <span className="text-ink-400">{label}</span>
+      {hint && <span className="text-ink-300">· {hint}</span>}
+    </span>
+  );
+}
+
+function PointGroup({ label, dot, claims }: { label: string; dot: string; claims: Claim[] }) {
+  if (!claims || claims.length === 0) return null;
+  return (
+    <div>
+      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">
+        <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+        {label}
+      </p>
+      <ClaimList claims={claims} />
+    </div>
+  );
+}
+
+function TeamCard({ m }: { m: TeamMember }) {
+  const cr = m.credentials;
+  const hasCreds =
+    !!cr &&
+    (!!cr.assessment ||
+      cr.papers_count != null ||
+      cr.patents_count != null ||
+      cr.years_experience != null ||
+      (cr.notable_achievements?.length ?? 0) > 0);
+  return (
+    <div className="overflow-hidden rounded-2xl border border-ink-100">
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-ink-100 bg-ink-50/50 px-4 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="font-semibold text-ink-900">{m.name}</p>
+            {m.linkedin_url && (
+              <a href={m.linkedin_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand-500 hover:text-brand-600">
+                in↗
+              </a>
+            )}
+          </div>
+          {m.title && <p className="text-xs text-ink-400">{m.title}</p>}
+        </div>
+        <div className="flex items-center gap-2">
+          {m.research_confidence === "inconclusive" && (
+            <span className="chip bg-orange-50 text-orange-600">not found online</span>
+          )}
+          <ConfidenceBadge c={m.research_confidence} />
+        </div>
+      </div>
+
+      <div className="space-y-4 px-4 py-4">
+        {hasCreds && cr && (
+          <div className="rounded-xl bg-ink-50/50 px-3 py-3">
+            <div className="flex flex-wrap gap-2">
+              {cr.years_experience != null && <CredStat label="experience" value={`~${cr.years_experience}y`} />}
+              {cr.papers_count != null && <CredStat label="papers" value={`${cr.papers_count}`} hint={cr.research_quality} />}
+              {cr.patents_count != null && (
+                <CredStat label="patents" value={`${cr.patents_count}`} hint={cr.patent_quality} tone={qualityTone(cr.patent_quality)} />
+              )}
+            </div>
+            {cr.assessment && <p className="mt-2.5 text-[13.5px] leading-relaxed text-ink-700">{cr.assessment}</p>}
+            {(cr.notable_achievements?.length ?? 0) > 0 && (
+              <div className="mt-2.5">
+                <ClaimList claims={cr.notable_achievements} />
+              </div>
+            )}
+          </div>
+        )}
+
+        <PointGroup label="Background & experience" dot="bg-ink-300" claims={m.researched_background} />
+        <PointGroup label="Strengths" dot="bg-emerald-500" claims={m.strengths} />
+        <PointGroup label="Founder–market fit" dot="bg-violet-500" claims={m.founder_market_fit} />
+        <PointGroup label="Gaps for this venture" dot="bg-amber-500" claims={m.gaps_vs_venture} />
+
+        {m.researched_background.length === 0 &&
+          m.strengths.length === 0 &&
+          m.founder_market_fit.length === 0 &&
+          m.gaps_vs_venture.length === 0 &&
+          !hasCreds && (
+            <p className="text-sm text-ink-400">No public background was found for this person.</p>
+          )}
+      </div>
     </div>
   );
 }

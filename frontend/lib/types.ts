@@ -19,11 +19,22 @@ export interface CompanySnapshot {
   deck_claims: Claim[];
 }
 
+export interface FounderCredentials {
+  years_experience?: number | null;
+  papers_count?: number | null;
+  patents_count?: number | null;
+  patent_quality: string;
+  research_quality: string;
+  notable_achievements: Claim[];
+  assessment: string;
+}
+
 export interface TeamMember {
   name: string;
   title?: string | null;
   linkedin_url?: string | null;
   deck_claims: Claim[];
+  credentials?: FounderCredentials;
   researched_background: Claim[];
   strengths: Claim[];
   founder_market_fit: Claim[];

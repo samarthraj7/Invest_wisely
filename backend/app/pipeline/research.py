@@ -33,12 +33,22 @@ def research_person(person: Person, company: str) -> dict[str, Any]:
 
     query = f"{person.name} {person.title or ''} {company} background work history".strip()
     web = search.search(query, num_results=RESULTS_PER_QUERY)
+    # Dedicated credential signals: research output and patents. These let the
+    # analysis judge not just IF someone is credentialed but how substantively.
+    papers = search.search(
+        f"{person.name} research papers publications google scholar", num_results=RESULTS_PER_QUERY
+    )
+    patents = search.search(
+        f"{person.name} patents inventor", num_results=RESULTS_PER_QUERY
+    )
     profile = enrich.lookup(person.name, company=company, linkedin_url=person.linkedin_url)
 
     bundle = {
         "name": person.name,
         "title": person.title,
         "web_results": web,
+        "papers": papers,
+        "patents": patents,
         "enrichment": profile,
         "found": bool(profile.get("found")) or bool([w for w in web if "mock" not in w["url"]]),
         "_cache_hit": False,

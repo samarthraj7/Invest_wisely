@@ -84,11 +84,41 @@ class CompanySnapshot(_SafeModel):
     deck_claims: List[Claim] = Field(default_factory=list)
 
 
+class FounderCredentials(_SafeModel):
+    """Hard evidence of what a founder has actually produced, with a judgement on
+    how *significant* it is — a single granted utility patent central to the product
+    counts very differently from a trivial design patent."""
+    years_experience: Optional[int] = Field(
+        default=None, description="Approx. years of relevant professional experience"
+    )
+    papers_count: Optional[int] = Field(default=None, description="Number of research papers/publications found")
+    patents_count: Optional[int] = Field(default=None, description="Number of patents found")
+    patent_quality: str = Field(
+        default="",
+        description='Significance of the patents: "substantive" | "mixed" | "trivial" | "unknown" '
+        "(e.g. granted utility patent central to the product vs. a basic design patent).",
+    )
+    research_quality: str = Field(
+        default="",
+        description="Significance of the papers/research: highly-cited / venue quality vs. obscure.",
+    )
+    notable_achievements: List[Claim] = Field(
+        default_factory=list,
+        description="Specific, sourced achievements: a key paper, a granted patent, a notable "
+        "role/exit — each with a note on why it matters (or doesn't).",
+    )
+    assessment: str = Field(
+        default="",
+        description="One-line overall read of credential depth: substantive track record vs. thin.",
+    )
+
+
 class TeamMemberAnalysis(_SafeModel):
     name: str = ""
     title: Optional[str] = None
     linkedin_url: Optional[str] = None
     deck_claims: List[Claim] = Field(default_factory=list)
+    credentials: FounderCredentials = Field(default_factory=FounderCredentials)
     researched_background: List[Claim] = Field(
         default_factory=list,
         description="What the person has actually done: prior roles, companies, years of "

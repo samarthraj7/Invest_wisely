@@ -55,6 +55,16 @@ _TEMPLATE = Template(
 {% for m in r.team_analysis %}
  <p><b>{{ m.name }}</b> — {{ m.title or '' }}
    <span class="conf">research: {{ m.research_confidence.value }}</span></p>
+ {% set cr = m.credentials %}
+ {% if cr and (cr.assessment or cr.papers_count is not none or cr.patents_count is not none or cr.notable_achievements) %}
+ <div style="font-size:12px;color:#475569;margin:2px 0 6px">
+   {% if cr.years_experience is not none %}<span class="pill" style="background:#eef2ff;color:#4338ca">~{{ cr.years_experience }}y exp</span> {% endif %}
+   {% if cr.papers_count is not none %}<span class="pill" style="background:#ecfeff;color:#0e7490">{{ cr.papers_count }} paper(s){% if cr.research_quality %} · {{ cr.research_quality }}{% endif %}</span> {% endif %}
+   {% if cr.patents_count is not none %}<span class="pill" style="background:#f5f3ff;color:#6d28d9">{{ cr.patents_count }} patent(s){% if cr.patent_quality %} · {{ cr.patent_quality }}{% endif %}</span> {% endif %}
+   {% if cr.assessment %}<div style="margin-top:4px">{{ cr.assessment }}</div>{% endif %}
+ </div>
+ {% for c in cr.notable_achievements %}{{ claim(c) }}{% endfor %}
+ {% endif %}
  {% if m.researched_background %}<p class="muted" style="font-size:12px;margin:4px 0 0"><b>Background &amp; experience</b></p>
  {% for c in m.researched_background %}{{ claim(c) }}{% endfor %}{% endif %}
  {% if m.strengths %}<p class="muted" style="font-size:12px;margin:4px 0 0"><b>Strengths</b></p>
@@ -197,6 +207,21 @@ def _export_docx(report: InvestmentReport, out_path: Path) -> tuple[Path, str]:
     doc.add_heading("2 · Team analysis", level=1)
     for m in r.team_analysis:
         doc.add_heading(f"{m.name} — {m.title or ''}  (research: {m.research_confidence.value})", level=2)
+        cr = m.credentials
+        if cr:
+            bits = []
+            if cr.years_experience is not None:
+                bits.append(f"~{cr.years_experience}y experience")
+            if cr.papers_count is not None:
+                bits.append(f"{cr.papers_count} paper(s)" + (f" ({cr.research_quality})" if cr.research_quality else ""))
+            if cr.patents_count is not None:
+                bits.append(f"{cr.patents_count} patent(s)" + (f" ({cr.patent_quality})" if cr.patent_quality else ""))
+            if bits:
+                doc.add_paragraph("Credentials: " + "  ·  ".join(bits))
+            if cr.assessment:
+                doc.add_paragraph(cr.assessment)
+            for c in cr.notable_achievements:
+                claim_p(c)
         for label, claims in (
             ("Background & experience", m.researched_background),
             ("Strengths", m.strengths),

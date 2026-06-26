@@ -31,6 +31,15 @@ ABSOLUTE GROUNDING RULES
 TEAM ANALYSIS (evaluate each person as a whole, not just one angle)
 - researched_background: what they have actually done — prior companies/roles, years of
   experience, education, notable achievements or exits (from research/enrichment).
+- credentials: judge HARD evidence and its SIGNIFICANCE, not just its existence.
+    * papers_count / patents_count / years_experience: best estimate from the research (null if unknown).
+    * patent_quality: "substantive" (granted utility patent central to the product),
+      "mixed", "trivial" (e.g. a basic design patent of little defensive value), or "unknown".
+    * research_quality: highly-cited / strong-venue work vs. obscure or unrelated.
+    * notable_achievements: 1-3 SPECIFIC items (a named paper, a granted patent, a real role/exit),
+      each as a sourced claim that says why it matters (or why it's weak).
+    * assessment: one line — is this a substantive track record or thin?
+  Do NOT inflate: 5 obscure papers or a design patent is not the same as deep, relevant work.
 - strengths: concrete positive signals for executing THIS plan (domain depth, operating/
   scaling experience, technical credibility, relevant prior wins).
 - founder_market_fit: weigh their track record against the SPECIFIC future the deck proposes
@@ -76,6 +85,9 @@ _SCHEMA_HINT = """Return ONE JSON object with EXACTLY these keys. A "claim" obje
   "executive_summary": "3-6 sentence consolidated take (what they do, strongest reason to be interested, biggest risk, bottom-line call)",
   "company_snapshot": {name, one_liner, sector, stage, location, ask, deck_claims:[claim]},
   "team_analysis": [{name, title, linkedin_url, deck_claims:[claim],
+                     credentials:{years_experience:int|null, papers_count:int|null, patents_count:int|null,
+                                  patent_quality:"substantive"|"mixed"|"trivial"|"unknown",
+                                  research_quality:"...", notable_achievements:[claim], assessment:"..."},
                      researched_background:[claim], strengths:[claim],
                      founder_market_fit:[claim], gaps_vs_venture:[claim],
                      research_confidence:"high"|"medium"|"low"|"inconclusive"}],
@@ -135,6 +147,8 @@ def _compact_research(research: dict[str, Any]) -> dict[str, Any]:
                 "title": p.get("title"),
                 "found": p.get("found"),
                 "web_results": _trim(p.get("web_results")),
+                "papers": _trim(p.get("papers")),
+                "patents": _trim(p.get("patents")),
                 "enrichment": enrichment,
             }
         )
