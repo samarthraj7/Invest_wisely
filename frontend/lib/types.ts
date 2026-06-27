@@ -152,6 +152,20 @@ export interface InvestmentScore {
   scored: boolean;
 }
 
+export interface Icebreaker {
+  founder: string;
+  common_ground: string[];
+  shared_interests: string[];
+  openers: string[];
+  note: string;
+}
+
+export interface IcebreakerSet {
+  founders: Icebreaker[];
+  overall: string;
+  available: boolean;
+}
+
 export interface InvestmentReport {
   executive_summary?: string;
   company_snapshot: CompanySnapshot;

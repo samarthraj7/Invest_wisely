@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { exportUrl, getDeck } from "@/lib/api";
+import { exportUrl, findIcebreakers, getDeck } from "@/lib/api";
 import type { ExportFormat } from "@/lib/api";
 import type { DeckDetail } from "@/lib/types";
-import type { Claim, TeamMember } from "@/lib/types";
+import type { Claim, IcebreakerSet, TeamMember } from "@/lib/types";
 import { Banner, ClaimList, ConfidenceBadge, ConfidenceMark, recMeta, Section, SEV_STYLE } from "@/components/ui";
 import { FactorBars, KnowledgeGraphView, RiskBreakdownView, ScoreGauge } from "@/components/score";
 
@@ -232,6 +232,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                 <TeamCard key={i} m={m} />
               ))}
             </div>
+            {r.team_analysis.length > 0 && <IcebreakerPanel deckId={deck.id} />}
           </Section>
 
           <Section id="competition" n={3} title="Competitive landscape">
@@ -428,6 +429,122 @@ function HeroStat({ label, value }: { label: string; value: React.ReactNode }) {
     <div className="px-4 py-3">
       <p className="text-[10px] uppercase tracking-wider text-ink-400">{label}</p>
       <div className="mt-0.5 text-sm font-semibold text-ink-900">{value}</div>
+    </div>
+  );
+}
+
+function IcebreakerPanel({ deckId }: { deckId: string }) {
+  const [open, setOpen] = useState(false);
+  const [background, setBackground] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<IcebreakerSet | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("iw_background");
+      if (saved) setBackground(saved);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const run = async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      try {
+        localStorage.setItem("iw_background", background);
+      } catch {
+        /* ignore */
+      }
+      setResult(await findIcebreakers(deckId, background));
+    } catch {
+      setErr("Couldn't generate icebreakers. Is the backend running?");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div id="icebreakers" className="scroll-mt-24 rounded-2xl border border-violet-100 bg-violet-50/30 p-4">
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between text-left">
+        <span className="flex items-center gap-2 text-sm font-semibold text-ink-800">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.8 9.8 0 0 1-4-.84L3 20l1.3-3.4A7.9 7.9 0 0 1 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          Find common ground &amp; icebreakers
+        </span>
+        <span className="text-xs text-ink-400">{open ? "Hide" : "Open"}</span>
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          <p className="text-xs text-ink-400">
+            Paste your background (or anyone&apos;s) — LinkedIn bio, résumé, interests. We&apos;ll find genuine
+            overlaps with each founder and suggest natural openers.
+          </p>
+          <textarea
+            value={background}
+            onChange={(e) => setBackground(e.target.value)}
+            rows={4}
+            placeholder="e.g. Studied CS at Stanford; ex-Stripe payments; angel in fintech; based in NYC; into climbing and jazz…"
+            className="input resize-y"
+          />
+          <div className="flex items-center gap-3">
+            <button onClick={run} disabled={loading || background.trim().length < 20} className="btn-primary px-4 py-2 text-sm disabled:opacity-50">
+              {loading ? "Finding…" : "Find common ground"}
+            </button>
+            <span className="text-xs text-ink-300">Saved locally for next time.</span>
+          </div>
+          {err && <p className="text-sm text-red-600">{err}</p>}
+
+          {result && !result.available && (
+            <p className="rounded-lg bg-ink-100/70 px-3 py-2 text-sm text-ink-500">
+              {result.overall || "No result."}
+            </p>
+          )}
+
+          {result && result.available && (
+            <div className="space-y-3">
+              {result.founders.map((f, i) => (
+                <div key={i} className="rounded-xl border border-ink-100 bg-white px-4 py-3">
+                  <p className="font-semibold text-ink-900">{f.founder}</p>
+                  {f.common_ground.length > 0 && (
+                    <div className="mt-1.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-600">Common ground</p>
+                      <ul className="mt-1 space-y-1 text-[13.5px] text-ink-700">
+                        {f.common_ground.map((x, k) => <li key={k}>• {x}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {f.shared_interests.length > 0 && (
+                    <p className="mt-2 text-[13px] text-ink-600">
+                      <span className="font-medium text-ink-500">Shared interests: </span>
+                      {f.shared_interests.join(", ")}
+                    </p>
+                  )}
+                  {f.openers.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-600">Openers</p>
+                      <ul className="mt-1 space-y-1 text-[13.5px] text-ink-700">
+                        {f.openers.map((x, k) => <li key={k} className="italic">“{x}”</li>)}
+                      </ul>
+                    </div>
+                  )}
+                  {f.note && <p className="mt-2 text-xs text-ink-400">{f.note}</p>}
+                </div>
+              ))}
+              {result.overall && (
+                <p className="rounded-xl bg-white px-4 py-3 text-[13.5px] text-ink-700">
+                  <span className="font-medium text-ink-500">Across the team: </span>
+                  {result.overall}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

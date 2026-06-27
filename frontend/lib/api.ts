@@ -1,4 +1,4 @@
-import type { DeckDetail, DeckListItem } from "./types";
+import type { DeckDetail, DeckListItem, IcebreakerSet } from "./types";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
@@ -38,6 +38,16 @@ export async function runDemo(): Promise<{ id: string }> {
 
 export async function deleteDeck(id: string): Promise<{ ok: boolean }> {
   return j(await fetch(`${API_BASE}/api/decks/${id}`, { method: "DELETE" }));
+}
+
+export async function findIcebreakers(id: string, background: string): Promise<IcebreakerSet> {
+  return j(
+    await fetch(`${API_BASE}/api/decks/${id}/icebreakers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ background }),
+    })
+  );
 }
 
 export type ExportFormat = "pdf" | "docx" | "html";

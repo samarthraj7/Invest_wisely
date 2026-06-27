@@ -213,6 +213,28 @@ class PitchDelivery(_SafeModel):
     notes: List[Claim] = Field(default_factory=list)
 
 
+class Icebreaker(_SafeModel):
+    """Genuine common ground between a viewer (investor) and one founder, plus
+    ready-to-use openers to break the ice in a first conversation."""
+    founder: str = ""
+    common_ground: List[str] = Field(
+        default_factory=list,
+        description="Real overlaps: shared schools, past employers, cities, domains, "
+        "research areas, communities — only genuine ones.",
+    )
+    shared_interests: List[str] = Field(default_factory=list)
+    openers: List[str] = Field(
+        default_factory=list, description="Natural icebreaker lines/questions to start the conversation."
+    )
+    note: str = Field(default="", description="If little/no overlap was found, say so honestly.")
+
+
+class IcebreakerSet(_SafeModel):
+    founders: List[Icebreaker] = Field(default_factory=list)
+    overall: str = Field(default="", description="Cross-team themes / talking points worth raising.")
+    available: bool = False
+
+
 class FinalRecommendation(_SafeModel):
     recommendation: Recommendation = Recommendation.more_diligence
     suggested_check_size: Optional[str] = None

@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from .config import get_settings
 from .db import Deck, SessionLocal, init_db
@@ -245,6 +246,25 @@ def delete_deck(deck_id: str) -> dict:
         s.delete(d)
         s.commit()
     return {"ok": True, "id": deck_id}
+
+
+class IcebreakerRequest(BaseModel):
+    background: str = ""
+
+
+@app.post("/api/decks/{deck_id}/icebreakers")
+def icebreakers(deck_id: str, body: IcebreakerRequest) -> dict:
+    """On-demand: find common ground / icebreakers between a supplied background
+    (your own or anyone's) and this deck's founders."""
+    from .pipeline.icebreakers import find_icebreakers
+
+    with SessionLocal() as s:
+        d = s.get(Deck, deck_id)
+        if not d or not d.report_json:
+            raise HTTPException(404, "Report not ready")
+        report = InvestmentReport.model_validate(d.report_json)
+    result = find_icebreakers(report, body.background)
+    return result.model_dump(mode="json")
 
 
 @app.get("/api/decks/{deck_id}/export")

@@ -70,18 +70,40 @@ def analyze_delivery(transcript: str | None, has_video: bool) -> PitchDelivery:
     )
     prompt = f"{_SCHEMA}\n\n{video_note}\n\n=== PITCH TRANSCRIPT ===\n{transcript[:14000]}"
 
+    # Identity sentinel: complete_json returns this exact object on any failure
+    # (degraded call, billing, or unparseable response), so `is` detects it.
+    sentinel = _mock_delivery()
     raw: dict[str, Any] = llm.complete_json(
-        system=_SYSTEM,
-        prompt=prompt,
-        mock=_mock_delivery(),
-        max_tokens=3000,
-        label="delivery",
+        system=_SYSTEM, prompt=prompt, mock=sentinel, max_tokens=3000, label="delivery",
     )
+    # One retry with a stricter, smaller prompt if the first response didn't parse
+    # but the model is still usable (handles a one-off malformed JSON response).
+    if raw is sentinel and llm.usable:
+        logger.warning("[delivery] first response unusable; retrying once (strict)")
+        retry_prompt = (
+            "Output ONLY a single minified JSON object, no prose, matching this shape:\n"
+            f"{_SCHEMA}\n\n{video_note}\n\n=== PITCH TRANSCRIPT ===\n{transcript[:9000]}"
+        )
+        raw = llm.complete_json(system=_SYSTEM, prompt=retry_prompt, mock=sentinel,
+                                max_tokens=3000, label="delivery")
+
+    if raw is sentinel or not llm.usable:
+        reason = (llm.last_error or "the model returned no usable result").strip()
+        if not reason.endswith("."):
+            reason += "."
+        logger.warning("[delivery] no usable result -> contextual message (%s)", reason)
+        return PitchDelivery(
+            available=True, source=source,
+            clarity=f"Pitch delivery was not analyzed because {reason} "
+                    "See the note at the top of the report and re-run once live analysis is available.",
+        )
+
     try:
         delivery = PitchDelivery.model_validate(raw)
     except Exception as exc:  # noqa: BLE001
-        logger.error("[delivery] validation failed -> placeholder (%s)", type(exc).__name__)
-        delivery = PitchDelivery.model_validate(_mock_delivery())
+        logger.error("[delivery] validation failed (%s) -> available with note", type(exc).__name__)
+        return PitchDelivery(available=True, source=source,
+                             clarity="Pitch delivery output could not be parsed. Re-run for a full assessment.")
     delivery.available = True
     delivery.source = source
     if not has_video:
@@ -93,8 +115,6 @@ def analyze_delivery(transcript: str | None, has_video: bool) -> PitchDelivery:
 
 def _mock_delivery() -> dict[str, Any]:
     return {
-        "clarity": "Pitch delivery could not be analyzed for this run (the model returned no "
-                   "usable result). Re-run with live analysis for a full assessment.",
-        "structure": "", "handling_of_questions": "", "tone": "",
+        "clarity": "", "structure": "", "handling_of_questions": "", "tone": "",
         "strengths": [], "weaknesses": [], "qa": [], "notes": [],
     }
