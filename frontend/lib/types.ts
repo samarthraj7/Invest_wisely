@@ -108,12 +108,17 @@ export interface GraphNode {
   label: string;
   type: string;
   detail: string;
+  score?: number | null;
+  weight?: number;
+  rationale?: string;
 }
 
 export interface GraphEdge {
   source: string;
   target: string;
   relation: string;
+  polarity?: string;
+  weight?: number;
 }
 
 export interface KnowledgeGraph {

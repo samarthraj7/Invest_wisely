@@ -43,11 +43,26 @@ _SCHEMA = """Return ONE JSON object:
 
 
 def analyze_delivery(transcript: str | None, has_video: bool) -> PitchDelivery:
-    if not transcript or len(transcript.strip()) < 40:
-        logger.info("[delivery] no usable transcript -> delivery analysis skipped")
+    n = len((transcript or "").strip())
+    if not transcript or n < 40:
+        logger.info("[delivery] no usable transcript (%d chars) -> skipped", n)
         return PitchDelivery(available=False)
 
+    llm = get_llm()
+    logger.info("[delivery] transcript=%d chars, has_video=%s, llm.usable=%s", n, has_video, llm.usable)
     source = "video+transcript" if has_video else "transcript"
+
+    # If the model isn't usable (no key / degraded mid-run), don't emit a vague
+    # "unavailable" line — say exactly why, consistent with the top-of-report note.
+    if not llm.usable:
+        reason = llm.last_error or "live analysis was unavailable for this run"
+        logger.warning("[delivery] LLM not usable -> contextual placeholder (%s)", reason)
+        return PitchDelivery(
+            available=True,
+            source=source,
+            clarity=f"Pitch delivery was not analyzed because {reason} See the note at the top of the report.",
+        )
+
     video_note = (
         "A VIDEO was provided: assess `tone` (delivery energy/confidence/pacing/composure)."
         if has_video
@@ -55,10 +70,10 @@ def analyze_delivery(transcript: str | None, has_video: bool) -> PitchDelivery:
     )
     prompt = f"{_SCHEMA}\n\n{video_note}\n\n=== PITCH TRANSCRIPT ===\n{transcript[:14000]}"
 
-    raw: dict[str, Any] = get_llm().complete_json(
+    raw: dict[str, Any] = llm.complete_json(
         system=_SYSTEM,
         prompt=prompt,
-        mock=_mock_delivery(has_video),
+        mock=_mock_delivery(),
         max_tokens=3000,
         label="delivery",
     )
@@ -66,7 +81,7 @@ def analyze_delivery(transcript: str | None, has_video: bool) -> PitchDelivery:
         delivery = PitchDelivery.model_validate(raw)
     except Exception as exc:  # noqa: BLE001
         logger.error("[delivery] validation failed -> placeholder (%s)", type(exc).__name__)
-        delivery = PitchDelivery.model_validate(_mock_delivery(has_video))
+        delivery = PitchDelivery.model_validate(_mock_delivery())
     delivery.available = True
     delivery.source = source
     if not has_video:
@@ -76,14 +91,10 @@ def analyze_delivery(transcript: str | None, has_video: bool) -> PitchDelivery:
     return delivery
 
 
-def _mock_delivery(has_video: bool) -> dict[str, Any]:
+def _mock_delivery() -> dict[str, Any]:
     return {
-        "clarity": "Delivery analysis was not generated (automated analysis unavailable).",
-        "structure": "",
-        "handling_of_questions": "",
-        "tone": "",
-        "strengths": [],
-        "weaknesses": [],
-        "qa": [],
-        "notes": [],
+        "clarity": "Pitch delivery could not be analyzed for this run (the model returned no "
+                   "usable result). Re-run with live analysis for a full assessment.",
+        "structure": "", "handling_of_questions": "", "tone": "",
+        "strengths": [], "weaknesses": [], "qa": [], "notes": [],
     }

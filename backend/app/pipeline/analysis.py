@@ -46,6 +46,17 @@ TEAM ANALYSIS (evaluate each person as a whole, not just one angle)
   — are they credibly positioned to build and sell this, given what they've done before?
 - gaps_vs_venture: specific missing experience that matters for THIS venture (and why).
 - Be balanced: a strong operator with one gap is different from a first-timer with many.
+- EARLY/STEALTH FOUNDERS: a thin or missing LinkedIn/public profile is NORMAL for
+  pre-seed/seed founders and is NOT itself a negative. Do NOT down-rank someone just
+  because little is public. Instead, read DEPTH from the enrichment "experiences"
+  (roles, companies, seniority, tenure/duration) and from research/papers. Judge what
+  they actually did, not how complete their profile is. Only call out inexperience when
+  there is a real signal of it — never merely because data is absent (in that case set
+  research_confidence="inconclusive" and say the profile is sparse, not weak).
+- RESEARCH OUTPUT: weigh publication QUALITY, not just count — venue/journal strength,
+  apparent citations/impact, and relevance to THIS venture. A few strong, relevant,
+  well-cited papers outweigh many obscure ones; the same for patents (granted utility &
+  central to the product vs. a trivial design patent).
 
 MARKET & DIFFERENTIATION
 - Use the research to identify who the real, current competitors are (named in deck AND
@@ -131,14 +142,25 @@ def _compact_research(research: dict[str, Any]) -> dict[str, Any]:
             enrichment = {
                 "found": True,
                 "headline": (enr.get("headline") or "")[:200],
+                "summary": (enr.get("summary") or "")[:300],
                 "source_url": enr.get("source_url"),
                 "experiences": [
                     {
                         "title": (e.get("title") or "")[:120],
                         "company": (e.get("company") or "")[:120],
+                        # tenure/duration matters for judging DEPTH on thin profiles
+                        "starts_at": e.get("starts_at") or e.get("start"),
+                        "ends_at": e.get("ends_at") or e.get("end"),
+                        "duration": e.get("duration"),
+                        "description": (e.get("description") or "")[:200],
                     }
-                    for e in (enr.get("experiences") or [])[:4]
+                    for e in (enr.get("experiences") or [])[:6]
                     if isinstance(e, dict)
+                ],
+                "education": [
+                    {"school": (ed.get("school") or "")[:120], "degree": (ed.get("degree_name") or ed.get("degree") or "")[:120]}
+                    for ed in (enr.get("education") or [])[:3]
+                    if isinstance(ed, dict)
                 ],
             }
         people.append(

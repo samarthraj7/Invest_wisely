@@ -1,14 +1,19 @@
-"""Step 7 - Knowledge graph + 0-100 investment score + risk breakdown.
+"""Step 7 - Knowledge-graph-driven investment score + risk breakdown.
 
-Runs AFTER the memo is written so it can reason over the finished analysis.
+The score is NOT a flat weighted average of independent factors. It is computed
+over an entity GRAPH where nodes (founders, market, traction, valuation,
+legitimacy, delivery) influence each other along typed edges:
 
-Design choices for trust:
-  * The OVERALL score is computed deterministically as a weighted blend of
-    per-factor scores. The LLM only scores each factor (0-100) + a one-line
-    rationale; the aggregation is transparent Python, not a number the model
-    pulled from the air.
-  * The knowledge graph is built deterministically from the report entities, so
-    the links always reflect what's actually in the memo.
+  * support edges  : a strong source lifts its target
+        founders --support--> traction / legitimacy / company
+        traction --support--> valuation        (traction justifies the ask)
+  * pressure edges : a strong source drags its target down
+        competitors --pressure--> market       (tough rivals weaken differentiation)
+        risks       --pressure--> legitimacy
+
+So "if one node is good, the next related node benefits" (and vice-versa). The
+LLM only scores each node 0-100; the interlinking + the final 0-100 are
+deterministic, logged Python — explainable and reproducible.
 """
 from __future__ import annotations
 
@@ -26,37 +31,54 @@ from ..schemas import (
     ScoreFactor,
 )
 
-# (key, display name, weight). Weights sum to 1.0 with delivery; if there's no
-# pitch recording, delivery is dropped and the rest are renormalized.
-_FACTORS: list[tuple[str, str, float]] = [
-    ("team", "Team & founders", 0.25),
-    ("market", "Market & differentiation", 0.20),
-    ("traction", "Traction & revenue", 0.20),
-    ("valuation", "Valuation reasonableness", 0.15),
-    ("legitimacy", "Company legitimacy", 0.10),
-    ("delivery", "Pitch delivery", 0.10),
-]
+# Pillar importance in the overall score (renormalized over whatever is present;
+# delivery is dropped when there's no pitch recording).
+_PILLAR_WEIGHTS = {
+    "founders": 0.26,
+    "market": 0.18,
+    "traction": 0.18,
+    "valuation": 0.14,
+    "legitimacy": 0.14,
+    "delivery": 0.10,
+}
+_SEV_PRESSURE = {"critical": 14.0, "high": 9.0, "medium": 4.0, "low": 1.0}
 
-_SYSTEM = """You are an investment committee scoring ONE startup you have just analyzed.
-Score each dimension 0-100 for THIS company using only the memo provided:
-- 80-100 exceptional / strong evidence; 60-79 solid; 40-59 mixed/unproven; 20-39 weak; 0-19 poor.
-Be critical and evidence-based; thin or unverifiable claims should pull scores DOWN.
-Then decompose the risk along: legitimacy (is the company/team/claims verifiable and real?),
-valuation (is the ask justified?), revenue (traction reality/durability), future_plan
-(credibility of roadmap & use of funds), and impact (how these combine + what would change the call).
-Return STRICT JSON only."""
+_SYSTEM = """You are an investment committee scoring ONE startup you have just analyzed, using
+ONLY the memo digest provided. Score each entity 0-100 for THIS company:
+  80-100 exceptional / strong evidence; 60-79 solid; 40-59 mixed/unproven; 20-39 weak; 0-19 poor.
+Be critical and evidence-based; thin or unverifiable claims pull scores DOWN.
+
+IMPORTANT on founders: a sparse or missing public/LinkedIn profile is NORMAL for early
+startups and is NOT a negative on its own. Judge DEPTH from their experiences (roles,
+companies, tenure) and from research output (publication QUALITY/venue/citations, patent
+significance), not from how public they are. Reward demonstrated, relevant work.
+
+For competitors, output a THREAT score 0-100 (how much each threatens this startup).
+Decompose risk along: legitimacy (verifiable/real?), valuation (ask justified?),
+revenue (traction reality/durability), future_plan (roadmap & use-of-funds credibility),
+and impact (how these combine + what would change the call). Return STRICT JSON only."""
 
 
-def _schema_hint(include_delivery: bool) -> str:
-    factors = ", ".join(f'"{k}"' for k, _, _ in _FACTORS if include_delivery or k != "delivery")
+def _schema_hint(founders: list[str], competitors: list[str], include_delivery: bool) -> str:
+    delivery_line = '  "delivery": {"score":0-100,"rationale":"one line"},\n' if include_delivery else ""
     return (
-        "Return ONE JSON object:\n"
-        "{\n"
-        '  "factors": { ' + factors + ': each -> {"score": 0-100 int, "rationale": "one line"} },\n'
+        "Return ONE JSON object (scores are integers 0-100):\n{\n"
+        '  "founders": [{"name":"<as given>","score":0-100,"rationale":"one line"}],\n'
+        '  "market": {"score":0-100,"rationale":"one line (market size + differentiation)"},\n'
+        '  "traction": {"score":0-100,"rationale":"one line"},\n'
+        '  "valuation": {"score":0-100,"rationale":"one line"},\n'
+        '  "legitimacy": {"score":0-100,"rationale":"one line"},\n'
+        + delivery_line +
+        '  "competitors": [{"name":"<as given>","threat":0-100,"rationale":"one line"}],\n'
         '  "risk": {"legitimacy":"...","valuation":"...","revenue":"...","future_plan":"...","impact":"..."},\n'
-        '  "rationale": "2-3 sentence justification of the overall investment score"\n'
-        "}"
+        '  "rationale": "2-3 sentence justification of the overall score"\n}\n'
+        f"founders to score (in order): {founders}\n"
+        f"competitors to score (in order): {competitors}"
     )
+
+
+def _clamp(x: float) -> int:
+    return int(round(max(0.0, min(100.0, x))))
 
 
 def _claim_texts(claims, n: int = 4) -> list[str]:
@@ -64,24 +86,21 @@ def _claim_texts(claims, n: int = 4) -> list[str]:
 
 
 def _memo_digest(report: InvestmentReport) -> dict[str, Any]:
-    """Compact, factual digest of the finished memo for the scorer."""
     s = report.company_snapshot
     team = []
     for m in report.team_analysis:
         cr = m.credentials
         team.append({
-            "name": m.name,
-            "title": m.title,
+            "name": m.name, "title": m.title,
             "research_confidence": m.research_confidence.value,
             "credentials": {
                 "years_experience": cr.years_experience,
-                "papers_count": cr.papers_count,
-                "patents_count": cr.patents_count,
-                "patent_quality": cr.patent_quality,
+                "papers_count": cr.papers_count, "patents_count": cr.patents_count,
+                "patent_quality": cr.patent_quality, "research_quality": cr.research_quality,
                 "assessment": cr.assessment,
             },
-            "strengths": _claim_texts(m.strengths),
-            "gaps": _claim_texts(m.gaps_vs_venture),
+            "background": _claim_texts(m.researched_background, 3),
+            "strengths": _claim_texts(m.strengths), "gaps": _claim_texts(m.gaps_vs_venture),
         })
     return {
         "company": {"name": s.name, "one_liner": s.one_liner, "sector": s.sector,
@@ -89,23 +108,14 @@ def _memo_digest(report: InvestmentReport) -> dict[str, Any]:
         "executive_summary": report.executive_summary,
         "team": team,
         "differentiation": _claim_texts(report.competitive_landscape.differentiation_assessment),
-        "competitors": [c.name for c in report.competitive_landscape.named_in_deck
-                        + report.competitive_landscape.discovered],
-        "valuation": {
-            "range": f"{report.valuation.range_low} - {report.valuation.range_high}",
-            "deck_ask": report.valuation.deck_ask,
-            "ask_vs_comps": _claim_texts(report.valuation.ask_vs_comps),
-        },
+        "valuation": {"range": f"{report.valuation.range_low} - {report.valuation.range_high}",
+                      "deck_ask": report.valuation.deck_ask,
+                      "ask_vs_comps": _claim_texts(report.valuation.ask_vs_comps)},
         "red_flags": [{"severity": f.severity.value, "title": f.title} for f in report.red_flags],
-        "recommendation": {
-            "call": report.recommendation.recommendation.value,
-            "risk_rating": report.recommendation.risk_rating,
-        },
-        "delivery": {
-            "available": report.delivery.available,
-            "clarity": report.delivery.clarity,
-            "handling_of_questions": report.delivery.handling_of_questions,
-        },
+        "recommendation": {"call": report.recommendation.recommendation.value,
+                           "risk_rating": report.recommendation.risk_rating},
+        "delivery": {"available": report.delivery.available, "clarity": report.delivery.clarity,
+                     "handling_of_questions": report.delivery.handling_of_questions},
     }
 
 
@@ -126,60 +136,127 @@ def compute_score(
 ) -> InvestmentScore:
     llm = get_llm()
     include_delivery = bool(report.delivery and report.delivery.available)
-    graph = build_graph(report)
+    founders = [m.name for m in report.team_analysis if m.name]
+    competitors = [c.name for c in report.competitive_landscape.named_in_deck
+                   + report.competitive_landscape.discovered if c.name]
 
     if not llm.usable:
-        logger.info("[scoring] LLM not usable -> unscored placeholder")
+        logger.info("[scoring] LLM not usable -> unscored placeholder + structural graph")
         return InvestmentScore(
-            overall=0,
-            verdict="Not scored",
-            factors=[],
+            overall=0, verdict="Not scored", factors=[],
             risk=RiskBreakdown(impact="Scoring did not run (live analysis unavailable)."),
             rationale="The 0-100 score was not generated because automated analysis did not run.",
-            graph=graph,
-            scored=False,
+            graph=_structural_graph(report), scored=False,
         )
 
     import json
 
-    prompt = (
-        f"{_schema_hint(include_delivery)}\n\n=== MEMO DIGEST ===\n"
-        f"{json.dumps(_memo_digest(report))[:7000]}"
-    )
-    raw = llm.complete_json(
-        system=_SYSTEM,
-        prompt=prompt,
-        mock={"factors": {}, "risk": {}, "rationale": ""},
-        max_tokens=1800,
-        label="scoring",
-    )
+    prompt = (f"{_schema_hint(founders, competitors, include_delivery)}\n\n"
+              f"=== MEMO DIGEST ===\n{json.dumps(_memo_digest(report))[:7000]}")
+    raw = llm.complete_json(system=_SYSTEM, prompt=prompt,
+                            mock={"founders": [], "competitors": [], "risk": {}, "rationale": ""},
+                            max_tokens=2200, label="scoring")
 
-    factors_in = raw.get("factors") or {}
-    active = [(k, name, w) for k, name, w in _FACTORS if include_delivery or k != "delivery"]
-    total_w = sum(w for _, _, w in active) or 1.0
-
-    factors: list[ScoreFactor] = []
-    weighted_sum = 0.0
-    for key, name, weight in active:
-        norm_w = weight / total_w
-        fi = factors_in.get(key) or {}
+    # ---- base scores from the model ----
+    def pillar(key: str, default: int = 50) -> tuple[int, str]:
+        d = raw.get(key) or {}
         try:
-            sc = int(round(float(fi.get("score", 0))))
+            sc = _clamp(float(d.get("score", default)))
         except (TypeError, ValueError):
-            sc = 0
-        sc = max(0, min(100, sc))
-        weighted_sum += sc * norm_w
-        factors.append(ScoreFactor(
-            key=key, name=name, score=sc, weight=round(norm_w, 3),
-            rationale=str(fi.get("rationale") or ""),
-        ))
+            sc = default
+        return sc, str(d.get("rationale") or "")
 
-    overall = int(round(weighted_sum))
+    founder_scores: list[tuple[str, int, str]] = []
+    for i, name in enumerate(founders):
+        fin = (raw.get("founders") or [])
+        item = fin[i] if i < len(fin) and isinstance(fin[i], dict) else {}
+        try:
+            fsc = _clamp(float(item.get("score", 50)))
+        except (TypeError, ValueError):
+            fsc = 50
+        founder_scores.append((name, fsc, str(item.get("rationale") or "")))
+    founder_avg = round(sum(s for _, s, _ in founder_scores) / len(founder_scores)) if founder_scores else 50
+
+    threats: list[tuple[str, int, str]] = []
+    for i, name in enumerate(competitors):
+        cin = (raw.get("competitors") or [])
+        item = cin[i] if i < len(cin) and isinstance(cin[i], dict) else {}
+        try:
+            tsc = _clamp(float(item.get("threat", 50)))
+        except (TypeError, ValueError):
+            tsc = 50
+        threats.append((name, tsc, str(item.get("rationale") or "")))
+    avg_threat = round(sum(t for _, t, _ in threats) / len(threats)) if threats else 50
+
+    market_base, market_rat = pillar("market")
+    traction_base, traction_rat = pillar("traction")
+    valuation_base, valuation_rat = pillar("valuation")
+    legit_base, legit_rat = pillar("legitimacy")
+    delivery_base, delivery_rat = pillar("delivery") if include_delivery else (0, "")
+
+    risk_pressure = min(30.0, sum(_SEV_PRESSURE.get(f.severity.value, 0.0) for f in report.red_flags))
+    founder_support = 0.15 * max(0, founder_avg - 60)
+
+    # ---- interlinked (effective) scores ----
+    market_eff = _clamp(market_base - 0.4 * (avg_threat - 50))
+    traction_eff = _clamp(traction_base + founder_support)
+    legit_eff = _clamp(legit_base + founder_support - risk_pressure)
+    valuation_eff = _clamp(valuation_base + 0.20 * (traction_eff - 50))
+    delivery_eff = delivery_base
+
+    def note(base: int, eff: int, why: str) -> str:
+        if eff == base:
+            return ""
+        return f" (adjusted {eff - base:+d} {why})"
+
+    logger.info("[scoring] base: founders=%d market=%d traction=%d valuation=%d legit=%d | "
+                "avg_threat=%d risk_pressure=%.0f", founder_avg, market_base, traction_base,
+                valuation_base, legit_base, avg_threat, risk_pressure)
+    logger.info("[scoring] eff:  market=%d traction=%d valuation=%d legit=%d",
+                market_eff, traction_eff, valuation_eff, legit_eff)
+
+    # ---- weighted overall over present pillars ----
+    pillars = {
+        "founders": (founder_avg, "Team & founders"),
+        "market": (market_eff, "Market & differentiation"),
+        "traction": (traction_eff, "Traction & revenue"),
+        "valuation": (valuation_eff, "Valuation reasonableness"),
+        "legitimacy": (legit_eff, "Company legitimacy"),
+    }
+    if include_delivery:
+        pillars["delivery"] = (delivery_eff, "Pitch delivery")
+    total_w = sum(_PILLAR_WEIGHTS[k] for k in pillars)
+    overall = _clamp(sum(val * _PILLAR_WEIGHTS[k] for k, (val, _) in pillars.items()) / total_w)
+
+    factors = [
+        ScoreFactor(key="founders", name="Team & founders", score=founder_avg,
+                    weight=round(_PILLAR_WEIGHTS["founders"] / total_w, 3),
+                    rationale=(founder_scores[0][2] if founder_scores else "No founders were identified in the deck.")),
+        ScoreFactor(key="market", name="Market & differentiation", score=market_eff,
+                    weight=round(_PILLAR_WEIGHTS["market"] / total_w, 3),
+                    rationale=market_rat + note(market_base, market_eff, "for competitor pressure")),
+        ScoreFactor(key="traction", name="Traction & revenue", score=traction_eff,
+                    weight=round(_PILLAR_WEIGHTS["traction"] / total_w, 3),
+                    rationale=traction_rat + note(traction_base, traction_eff, "for founder strength")),
+        ScoreFactor(key="valuation", name="Valuation reasonableness", score=valuation_eff,
+                    weight=round(_PILLAR_WEIGHTS["valuation"] / total_w, 3),
+                    rationale=valuation_rat + note(valuation_base, valuation_eff, "for traction support")),
+        ScoreFactor(key="legitimacy", name="Company legitimacy", score=legit_eff,
+                    weight=round(_PILLAR_WEIGHTS["legitimacy"] / total_w, 3),
+                    rationale=legit_rat + note(legit_base, legit_eff, "for risks/founder strength")),
+    ]
+    if include_delivery:
+        factors.append(ScoreFactor(key="delivery", name="Pitch delivery", score=delivery_eff,
+                                    weight=round(_PILLAR_WEIGHTS["delivery"] / total_w, 3),
+                                    rationale=delivery_rat))
+
+    graph = _scored_graph(report, overall, founder_scores, market_eff, market_rat,
+                          traction_eff, valuation_eff, legit_eff,
+                          delivery_eff if include_delivery else None, threats)
+
     risk_in = raw.get("risk") or {}
     score = InvestmentScore(
-        overall=overall,
-        verdict=_verdict(overall),
-        factors=factors,
+        overall=overall, verdict=_verdict(overall), factors=factors,
         risk=RiskBreakdown(
             legitimacy=str(risk_in.get("legitimacy") or ""),
             valuation=str(risk_in.get("valuation") or ""),
@@ -188,55 +265,110 @@ def compute_score(
             impact=str(risk_in.get("impact") or ""),
         ),
         rationale=str(raw.get("rationale") or ""),
-        graph=graph,
-        scored=True,
+        graph=graph, scored=True,
     )
-    logger.info("[scoring] overall=%d (%s) across %d factor(s)",
-                overall, score.verdict, len(factors))
+    logger.info("[scoring] OVERALL=%d (%s) from interlinked graph (%d nodes, %d edges)",
+                overall, score.verdict, len(graph.nodes), len(graph.edges))
     return score
 
 
-def build_graph(report: InvestmentReport) -> KnowledgeGraph:
-    """Deterministically link the report's entities into a small knowledge graph."""
+def _scored_graph(report, overall, founder_scores, market_eff, market_rat,
+                  traction_eff, valuation_eff, legit_eff, delivery_eff, threats) -> KnowledgeGraph:
+    s = report.company_snapshot
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
-    seen: set[str] = set()
 
-    def add_node(nid: str, label: str, ntype: str, detail: str = "") -> str | None:
-        if not label:
-            return None
-        if nid in seen:
-            return nid
-        seen.add(nid)
-        nodes.append(GraphNode(id=nid, label=label[:60], type=ntype, detail=detail[:140]))
-        return nid
+    def n(nid, label, ntype, score=None, weight=0.0, rationale="", detail=""):
+        nodes.append(GraphNode(id=nid, label=(label or "")[:60], type=ntype, score=score,
+                               weight=weight, rationale=rationale[:200], detail=detail[:140]))
 
-    s = report.company_snapshot
-    company_id = add_node("company", s.name or "This company", "company", s.one_liner)
+    n("company", s.name or "This company", "company", score=overall, weight=1.0,
+      rationale="Weighted blend of the linked pillars below.", detail=s.one_liner)
 
-    if s.sector:
-        add_node("market", s.sector, "market", "Sector / market")
-        edges.append(GraphEdge(source=company_id, target="market", relation="operates in"))
+    for i, (name, sc, rat) in enumerate(founder_scores):
+        fid = f"founder{i}"
+        n(fid, name, "founder", score=sc, weight=_PILLAR_WEIGHTS["founders"], rationale=rat)
+        edges.append(GraphEdge(source=fid, target="company", relation="founder of",
+                               polarity="support", weight=round(sc / 100, 2)))
+        edges.append(GraphEdge(source=fid, target="traction", relation="drives",
+                               polarity="support", weight=0.3))
+        edges.append(GraphEdge(source=fid, target="legitimacy", relation="lends credibility",
+                               polarity="support", weight=0.3))
 
-    for i, m in enumerate(report.team_analysis):
-        nid = add_node(f"founder{i}", m.name, "founder", m.title or "")
-        if nid:
-            edges.append(GraphEdge(source=nid, target=company_id, relation="founder of"))
+    n("market", s.sector or "Market", "market", score=market_eff,
+      weight=_PILLAR_WEIGHTS["market"], rationale=market_rat)
+    edges.append(GraphEdge(source="market", target="company", relation="opportunity for",
+                           polarity="support", weight=0.6))
 
-    for i, c in enumerate(report.competitive_landscape.named_in_deck
-                          + report.competitive_landscape.discovered):
-        nid = add_node(f"comp{i}", c.name, "competitor", c.relationship)
-        if nid:
-            edges.append(GraphEdge(source=company_id, target=nid, relation="competes with"))
+    n("traction", "Traction & revenue", "traction", score=traction_eff,
+      weight=_PILLAR_WEIGHTS["traction"], rationale="")
+    edges.append(GraphEdge(source="traction", target="company", relation="proves",
+                           polarity="support", weight=0.6))
+    edges.append(GraphEdge(source="traction", target="valuation", relation="justifies",
+                           polarity="support", weight=0.6))
 
-    if s.ask or report.valuation.deck_ask:
-        add_node("valuation", s.ask or report.valuation.deck_ask or "Raise", "valuation", "Ask / valuation")
-        edges.append(GraphEdge(source=company_id, target="valuation", relation="raising"))
+    n("valuation", s.ask or report.valuation.deck_ask or "Valuation / ask", "valuation",
+      score=valuation_eff, weight=_PILLAR_WEIGHTS["valuation"], rationale="")
+    edges.append(GraphEdge(source="valuation", target="company", relation="priced at",
+                           polarity="support", weight=0.5))
+
+    n("legitimacy", "Legitimacy", "legitimacy", score=legit_eff,
+      weight=_PILLAR_WEIGHTS["legitimacy"], rationale="")
+    edges.append(GraphEdge(source="legitimacy", target="company", relation="grounds",
+                           polarity="support", weight=0.7))
+
+    if delivery_eff is not None:
+        n("delivery", "Pitch delivery", "delivery", score=delivery_eff,
+          weight=_PILLAR_WEIGHTS["delivery"], rationale="")
+        edges.append(GraphEdge(source="delivery", target="company", relation="communicated by",
+                               polarity="support", weight=0.4))
+
+    for i, (name, threat, rat) in enumerate(threats[:5]):
+        cid = f"comp{i}"
+        n(cid, name, "competitor", score=None, rationale=rat, detail=f"threat {threat}/100")
+        edges.append(GraphEdge(source=cid, target="market", relation="competes",
+                               polarity="pressure", weight=round(threat / 100, 2)))
 
     for i, f in enumerate([f for f in report.red_flags
                            if f.severity.value in ("critical", "high")][:3]):
-        nid = add_node(f"risk{i}", f.title, "risk", f.severity.value)
-        if nid:
-            edges.append(GraphEdge(source=company_id, target=nid, relation="risk"))
+        rid = f"risk{i}"
+        n(rid, f.title, "risk", score=None, detail=f.severity.value)
+        edges.append(GraphEdge(source=rid, target="legitimacy", relation="risk",
+                               polarity="pressure", weight=0.9 if f.severity.value == "critical" else 0.6))
 
     return KnowledgeGraph(nodes=nodes, edges=edges)
+
+
+def _structural_graph(report: InvestmentReport) -> KnowledgeGraph:
+    """Unscored graph (used when scoring didn't run) — still shows the entity links."""
+    s = report.company_snapshot
+    nodes: list[GraphNode] = [GraphNode(id="company", label=(s.name or "This company")[:60],
+                                        type="company", detail=s.one_liner[:140])]
+    edges: list[GraphEdge] = []
+    seen = {"company"}
+
+    def add(nid, label, ntype, rel, detail=""):
+        if not label or nid in seen:
+            return
+        seen.add(nid)
+        nodes.append(GraphNode(id=nid, label=label[:60], type=ntype, detail=detail[:140]))
+        if ntype in ("competitor", "risk"):
+            edges.append(GraphEdge(source=nid, target="company", relation=rel, polarity="pressure"))
+        else:
+            edges.append(GraphEdge(source=nid, target="company", relation=rel, polarity="support"))
+
+    if s.sector:
+        add("market", s.sector, "market", "opportunity for")
+    for i, m in enumerate(report.team_analysis):
+        add(f"founder{i}", m.name, "founder", "founder of", m.title or "")
+    for i, c in enumerate(report.competitive_landscape.named_in_deck
+                          + report.competitive_landscape.discovered):
+        add(f"comp{i}", c.name, "competitor", "competes", c.relationship)
+    if s.ask or report.valuation.deck_ask:
+        add("valuation", s.ask or report.valuation.deck_ask or "Raise", "valuation", "priced at")
+    return KnowledgeGraph(nodes=nodes, edges=edges)
+
+
+# Back-compat for callers/tests that referenced the old name.
+def build_graph(report: InvestmentReport) -> KnowledgeGraph:
+    return _structural_graph(report)

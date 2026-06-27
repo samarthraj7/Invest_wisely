@@ -224,14 +224,19 @@ class FinalRecommendation(_SafeModel):
 class GraphNode(_SafeModel):
     id: str = ""
     label: str = ""
-    type: str = Field(default="", description="company|founder|market|competitor|valuation|traction|risk")
+    type: str = Field(default="", description="company|founder|market|competitor|valuation|traction|legitimacy|delivery|risk")
     detail: str = ""
+    score: Optional[int] = Field(default=None, description="0-100 score for this node (None = unscored/structural)")
+    weight: float = Field(default=0.0, description="Importance of this node in the overall score")
+    rationale: str = ""
 
 
 class GraphEdge(_SafeModel):
     source: str = ""
     target: str = ""
     relation: str = ""
+    polarity: str = Field(default="neutral", description='"support" | "pressure" | "neutral" — how source affects target')
+    weight: float = Field(default=1.0, description="Strength of the link (0-1)")
 
 
 class KnowledgeGraph(_SafeModel):

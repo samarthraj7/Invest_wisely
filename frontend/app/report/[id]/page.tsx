@@ -179,6 +179,13 @@ export default function ReportPage({ params }: { params: { id: string } }) {
               <p className="mt-6 mb-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
                 Entity knowledge graph
               </p>
+              <p className="mb-2 text-[12px] leading-relaxed text-ink-400">
+                The score isn&apos;t a flat average — nodes influence each other along the links:
+                strong founders <span className="text-emerald-600">support</span> traction &amp; legitimacy,
+                traction justifies valuation, while competitors and risks{" "}
+                <span className="text-red-500">pressure</span> market &amp; legitimacy. The company score is
+                the weighted blend of these interlinked pillars.
+              </p>
               <KnowledgeGraphView graph={r.score.graph} />
             </>
           )}

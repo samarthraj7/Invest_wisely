@@ -97,13 +97,19 @@ const NODE_COLOR: Record<string, string> = {
   risk: "#ef4444",
 };
 
+const EDGE_COLOR: Record<string, string> = {
+  support: "#34d399",
+  pressure: "#f87171",
+  neutral: "#cbd5e1",
+};
+
 export function KnowledgeGraphView({ graph }: { graph: KnowledgeGraph }) {
   if (!graph || graph.nodes.length === 0) return null;
-  const W = 640;
-  const H = 380;
+  const W = 680;
+  const H = 440;
   const cx = W / 2;
   const cy = H / 2;
-  const R = 142;
+  const R = 168;
 
   const center = graph.nodes.find((n) => n.id === "company") ?? graph.nodes[0];
   const others = graph.nodes.filter((n) => n.id !== center.id);
@@ -113,27 +119,30 @@ export function KnowledgeGraphView({ graph }: { graph: KnowledgeGraph }) {
     pos[n.id] = { x: cx + R * Math.cos(angle), y: cy + R * Math.sin(angle) };
   });
 
+  const nodeColor = (n: KnowledgeGraph["nodes"][number]) =>
+    typeof n.score === "number" ? scoreHex(n.score) : NODE_COLOR[n.type] ?? "#94a3b8";
+
   return (
     <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" style={{ minWidth: 480 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" style={{ minWidth: 520 }}>
         {graph.edges.map((e, i) => {
           const a = pos[e.source];
           const b = pos[e.target];
           if (!a || !b) return null;
+          const col = EDGE_COLOR[e.polarity ?? "neutral"] ?? "#cbd5e1";
+          const w = 1 + 2.5 * (e.weight ?? 0.4);
           return (
             <g key={i}>
-              <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#cbd5e1" strokeWidth="1.5" />
-              {e.relation && (
-                <text
-                  x={(a.x + b.x) / 2}
-                  y={(a.y + b.y) / 2 - 3}
-                  textAnchor="middle"
-                  className="fill-ink-300"
-                  style={{ fontSize: 9 }}
-                >
-                  {e.relation}
-                </text>
-              )}
+              <line
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke={col}
+                strokeWidth={w}
+                strokeDasharray={e.polarity === "pressure" ? "4 3" : undefined}
+                opacity={0.75}
+              />
             </g>
           );
         })}
@@ -141,12 +150,22 @@ export function KnowledgeGraphView({ graph }: { graph: KnowledgeGraph }) {
           const p = pos[n.id];
           if (!p) return null;
           const isCenter = n.id === center.id;
-          const color = NODE_COLOR[n.type] ?? "#64748b";
-          const rad = isCenter ? 12 : 8;
+          const color = nodeColor(n);
+          const rad = isCenter ? 26 : typeof n.score === "number" ? 18 : 13;
+          const scored = typeof n.score === "number";
           return (
             <g key={n.id}>
-              <title>{n.detail ? `${n.label} — ${n.detail}` : n.label}</title>
-              <circle cx={p.x} cy={p.y} r={rad} fill={color} opacity={isCenter ? 1 : 0.9} />
+              <title>
+                {`${n.label}${scored ? ` — ${n.score}/100` : n.detail ? ` — ${n.detail}` : ""}${
+                  n.rationale ? `\n${n.rationale}` : ""
+                }`}
+              </title>
+              <circle cx={p.x} cy={p.y} r={rad} fill={color} opacity={isCenter ? 1 : 0.92} />
+              {scored && (
+                <text x={p.x} y={p.y + 4} textAnchor="middle" fill="#fff" style={{ fontSize: isCenter ? 15 : 12, fontWeight: 700 }}>
+                  {n.score}
+                </text>
+              )}
               <text
                 x={p.x}
                 y={p.y + rad + 13}
@@ -154,21 +173,20 @@ export function KnowledgeGraphView({ graph }: { graph: KnowledgeGraph }) {
                 className={isCenter ? "fill-ink-900" : "fill-ink-600"}
                 style={{ fontSize: isCenter ? 13 : 11, fontWeight: isCenter ? 700 : 500 }}
               >
-                {n.label.length > 22 ? n.label.slice(0, 21) + "…" : n.label}
+                {n.label.length > 20 ? n.label.slice(0, 19) + "…" : n.label}
               </text>
             </g>
           );
         })}
       </svg>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-        {Object.entries(NODE_COLOR)
-          .filter(([t]) => graph.nodes.some((n) => n.type === t))
-          .map(([t, col]) => (
-            <span key={t} className="flex items-center gap-1.5 text-[11px] text-ink-400">
-              <span className="h-2 w-2 rounded-full" style={{ background: col }} />
-              {t}
-            </span>
-          ))}
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="flex items-center gap-1.5 text-[11px] text-ink-400">
+          <span className="inline-block h-0.5 w-4" style={{ background: EDGE_COLOR.support }} /> supports
+        </span>
+        <span className="flex items-center gap-1.5 text-[11px] text-ink-400">
+          <span className="inline-block h-0.5 w-4 border-t border-dashed" style={{ borderColor: EDGE_COLOR.pressure }} /> pressures
+        </span>
+        <span className="text-[11px] text-ink-300">· node color = score (red→green); ring size = weight</span>
       </div>
     </div>
   );
