@@ -141,6 +141,16 @@ def compute_score(
     llm = get_llm()
     include_delivery = bool(report.delivery and report.delivery.available)
     founders = [m.name for m in report.team_analysis if m.name]
+    # Only score the team if we actually learned something about them. With no
+    # verifiable data, scoring a founder pillar would be guesswork — so we drop it
+    # from the overall (the weights renormalize over the remaining pillars).
+    founder_data = any(
+        bool(m.researched_background) or bool(m.strengths) or bool(m.founder_market_fit)
+        or bool(m.credentials and m.credentials.assessment)
+        or m.research_confidence.value in ("high", "medium")
+        for m in report.team_analysis
+    )
+    include_founders = bool(founders) and founder_data
     competitors = [c.name for c in report.competitive_landscape.named_in_deck
                    + report.competitive_landscape.discovered if c.name]
 
@@ -210,13 +220,15 @@ def compute_score(
 
     risk_pressure = min(30.0, sum(_SEV_PRESSURE.get(f.severity.value, 0.0) for f in report.red_flags))
     # The TEAM (as a whole) is the source of support that flows into the rest of
-    # the graph — strong, complete teams lift execution-dependent pillars.
-    founder_support = 0.15 * max(0, founder_eff - 60)
+    # the graph — strong, complete teams lift execution-dependent pillars. With no
+    # founder data we don't let an unknown team push the other pillars around.
+    founder_support = (0.15 * max(0, founder_eff - 60)) if include_founders else 0.0
     delivery_support = 0.10 * max(0, delivery_base - 60) if include_delivery else 0.0
 
     # ---- interlinked (effective) scores ----
+    fmfit = (0.10 * max(0, founder_eff - 60)) if include_founders else 0.0
     # market is helped a bit by founder-market fit, hurt by competitor threat
-    market_eff = _clamp(market_base - 0.4 * (avg_threat - 50) + 0.10 * max(0, founder_eff - 60))
+    market_eff = _clamp(market_base - 0.4 * (avg_threat - 50) + fmfit)
     # traction is driven by team strength AND by market pull
     traction_eff = _clamp(traction_base + founder_support + 0.10 * (market_eff - 50))
     # legitimacy is lent by the team and clear delivery, dragged by risks
@@ -238,23 +250,30 @@ def compute_score(
 
     # ---- weighted overall over present pillars ----
     pillars = {
-        "founders": (founder_eff, "Team & founders"),
         "market": (market_eff, "Market & differentiation"),
         "traction": (traction_eff, "Traction & revenue"),
         "valuation": (valuation_eff, "Valuation reasonableness"),
         "legitimacy": (legit_eff, "Company legitimacy"),
     }
+    if include_founders:
+        pillars["founders"] = (founder_eff, "Team & founders")
     if include_delivery:
         pillars["delivery"] = (delivery_eff, "Pitch delivery")
     total_w = sum(_PILLAR_WEIGHTS[k] for k in pillars)
     overall = _clamp(sum(val * _PILLAR_WEIGHTS[k] for k, (val, _) in pillars.items()) / total_w)
 
-    team_rat = (ta.verdict or ta.summary or
-                (founder_scores[0][2] if founder_scores else "No founders were identified in the deck."))
-    factors = [
-        ScoreFactor(key="founders", name="Team & founders", score=founder_eff,
-                    weight=round(_PILLAR_WEIGHTS["founders"] / total_w, 3),
-                    rationale=team_rat + note(founder_avg, founder_eff, "for team composition")),
+    if include_founders:
+        team_rat = (ta.verdict or ta.summary or
+                    (founder_scores[0][2] if founder_scores else ""))
+    else:
+        team_rat = ("No verifiable information was found about the founder(s), so the team is "
+                    "not scored and is excluded from the overall.")
+    factors: list[ScoreFactor] = []
+    if include_founders:
+        factors.append(ScoreFactor(key="founders", name="Team & founders", score=founder_eff,
+                                    weight=round(_PILLAR_WEIGHTS["founders"] / total_w, 3),
+                                    rationale=team_rat + note(founder_avg, founder_eff, "for team composition")))
+    factors += [
         ScoreFactor(key="market", name="Market & differentiation", score=market_eff,
                     weight=round(_PILLAR_WEIGHTS["market"] / total_w, 3),
                     rationale=market_rat + note(market_base, market_eff, "for competitor pressure")),
@@ -273,7 +292,8 @@ def compute_score(
                                     weight=round(_PILLAR_WEIGHTS["delivery"] / total_w, 3),
                                     rationale=delivery_rat))
 
-    graph = _scored_graph(report, overall, founder_scores, founder_eff, team_rat,
+    graph = _scored_graph(report, overall, founder_scores,
+                          founder_eff if include_founders else None, team_rat,
                           market_eff, market_rat, traction_eff, valuation_eff, legit_eff,
                           delivery_eff if include_delivery else None, threats)
 
@@ -322,7 +342,10 @@ def _scored_graph(report, overall, founder_scores, founder_eff, team_rat, market
 
     # --- Team (as a whole) aggregates the individual founders ---
     ta = report.team_assessment
-    team_detail = ta.rating or (f"{len(founder_scores)} founder(s)" if founder_scores else "")
+    if founder_eff is None:
+        team_detail = "not scored — no founder data"
+    else:
+        team_detail = ta.rating or (f"{len(founder_scores)} founder(s)" if founder_scores else "")
     n("team", "Founding team", "team", score=founder_eff,
       weight=_PILLAR_WEIGHTS["founders"], rationale=team_rat, detail=team_detail)
     e("team", "company", "builds", "support", 0.8)

@@ -51,10 +51,14 @@ def _find_person_on_web(search, person: Person, company: str) -> tuple[list[dict
         return search.search(q, num_results=RESULTS_PER_QUERY), q
 
     attempts = [
-        (f'"{name}" "{company}"', "name+company"),
-        (f"{company} team people {name} {title}".strip(), "company-people"),
+        # 1) the person tied to the company (often surfaces their LinkedIn directly)
+        (f'"{name}" "{company}" linkedin', "name+company"),
+        # 2) the company's own team/about page (works even before they're "public")
+        (f"{company} team about founders leadership {name}".strip(), "company-about"),
+        (f"{company} official website team {name}".strip(), "company-website"),
     ]
     if person.keywords:
+        # 3) by what the deck says they do — last resort when name+company is thin
         attempts.append((f"{name} {person.keywords}", "name+deck-keywords"))
     # Always keep a generic background query as the final net.
     attempts.append((f"{name} {title} {company} background work history".strip(), "background"))
@@ -123,6 +127,11 @@ def research_company(company: str, sector: str | None) -> dict[str, Any]:
         "funding_comps": search.search(
             f"{sector or company} seed round size valuation 2025 2026", num_results=RESULTS_PER_QUERY
         ),
+        # The company's own team/about page — mined to learn about founders whose
+        # individual lookups come back thin (common for pre-/early-public startups).
+        "team_about": search.search(
+            f"{company} team about us founders leadership management", num_results=RESULTS_PER_QUERY
+        ),
         "_cache_hit": False,
     }
     cache.put(key, "company", bundle)
@@ -150,8 +159,22 @@ def research_competitor(name: str) -> dict[str, Any]:
 def run_research(entities: Entities) -> dict[str, Any]:
     people = entities.people[:MAX_PEOPLE]
     competitors = entities.competitors_named[:MAX_COMPETITORS]
+
+    company = research_company(entities.company_name, entities.sector)
+    team_signal = [r for r in (company.get("team_about") or []) if _is_real([r])]
+
+    person_bundles: list[dict[str, Any]] = []
+    for p in people:
+        b = research_person(p, entities.company_name)
+        # If we couldn't confidently locate the person directly, hand the analyst
+        # the company's own team/about page to mine for them.
+        if not b.get("found") and team_signal:
+            b = {**b, "company_team_signal": team_signal}
+            logger.info("[research] '%s' thin -> attaching company team/about page signal", p.name)
+        person_bundles.append(b)
+
     return {
-        "company": research_company(entities.company_name, entities.sector),
-        "people": [research_person(p, entities.company_name) for p in people],
+        "company": company,
+        "people": person_bundles,
         "competitors": [research_competitor(c) for c in competitors],
     }

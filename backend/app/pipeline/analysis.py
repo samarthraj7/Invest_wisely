@@ -102,10 +102,13 @@ CONSOLIDATED SUMMARY
   strongest reason to be interested, the biggest risk, and the bottom-line call. This must be
   consistent with the detailed sections.
 
-OUTPUT BUDGET (so the JSON is COMPLETE, never truncated)
-- Be concise: 1-2 sentences per claim. Prefer fewer, higher-signal items.
-- Aim for 3-6 red flags, 4-6 diligence questions, 2-4 strengths/gaps per key person.
-- Return the FULL valid JSON object; do not get cut off mid-structure.
+OUTPUT BUDGET (be tight — no filler, no repetition; the JSON must be COMPLETE)
+- One sentence per claim. Make each point DISTINCT — never restate the same idea across
+  background/strengths/fit. If a point fits two buckets, put it in the most relevant one only.
+- Caps: <=3 deck_claims in snapshot, <=2 per team bucket (background/strengths/fit/gaps),
+  <=2 notable_achievements, <=4 red flags, <=4 diligence questions,
+  <=3 differentiation points, <=3 future opportunities, <=3 headwinds.
+- Prefer fewer, higher-signal items over many weak ones. Return the FULL valid JSON.
 """
 
 
@@ -188,17 +191,20 @@ def _compact_research(research: dict[str, Any]) -> dict[str, Any]:
                     if isinstance(ed, dict)
                 ],
             }
-        people.append(
-            {
-                "name": p.get("name"),
-                "title": p.get("title"),
-                "found": p.get("found"),
-                "web_results": _trim(p.get("web_results")),
-                "papers": _trim(p.get("papers")),
-                "patents": _trim(p.get("patents")),
-                "enrichment": enrichment,
-            }
-        )
+        person = {
+            "name": p.get("name"),
+            "title": p.get("title"),
+            "found": p.get("found"),
+            "web_results": _trim(p.get("web_results")),
+            "papers": _trim(p.get("papers")),
+            "patents": _trim(p.get("patents")),
+            "enrichment": enrichment,
+        }
+        # When the person wasn't found directly, the company's own team/about page
+        # is the best place to learn who they are — mine it for THIS person.
+        if p.get("company_team_signal"):
+            person["company_team_page"] = _trim(p.get("company_team_signal"))
+        people.append(person)
     competitors = [
         {"name": c.get("name"), "results": _trim(c.get("results"))}
         for c in (research.get("competitors", []) or [])

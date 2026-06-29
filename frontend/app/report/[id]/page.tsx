@@ -1,24 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { exportUrl, findIcebreakers, getDeck } from "@/lib/api";
 import type { ExportFormat } from "@/lib/api";
 import type { DeckDetail } from "@/lib/types";
 import type { Claim, IcebreakerSet, TeamAssessment, TeamMember } from "@/lib/types";
-import { Banner, ClaimList, ConfidenceBadge, ConfidenceMark, recMeta, Section, SEV_STYLE } from "@/components/ui";
+import { Banner, ClaimList, ConfidenceBadge, ConfidenceMark, recMeta, SEV_STYLE } from "@/components/ui";
 import { FactorBars, KnowledgeGraphView, RiskBreakdownView, ScoreGauge } from "@/components/score";
-
-const NAV = [
-  ["snapshot", "Company snapshot"],
-  ["team", "Team analysis"],
-  ["competition", "Competitive landscape"],
-  ["flags", "Red flags"],
-  ["diligence", "Diligence questions"],
-  ["valuation", "Valuation"],
-  ["future", "Future scope"],
-  ["recommendation", "Recommendation"],
-] as const;
 
 function sevRank(s: string) {
   return { critical: 0, high: 1, medium: 2, low: 3 }[s] ?? 9;
@@ -27,6 +16,8 @@ function sevRank(s: string) {
 export default function ReportPage({ params }: { params: { id: string } }) {
   const [deck, setDeck] = useState<DeckDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const inited = useRef(false);
 
   useEffect(() => {
     let stop = false;
@@ -46,6 +37,14 @@ export default function ReportPage({ params }: { params: { id: string } }) {
     };
   }, [params.id]);
 
+  // Open the headline section once the report lands (score if present, else snapshot).
+  useEffect(() => {
+    if (!inited.current && deck?.report) {
+      inited.current = true;
+      setOpenId(deck.report.score?.scored ? "score" : "snapshot");
+    }
+  }, [deck]);
+
   if (error) return <Back>{error}</Back>;
   if (!deck) return <Loading label="Loading report…" />;
   if (deck.status === "error")
@@ -63,6 +62,350 @@ export default function ReportPage({ params }: { params: { id: string } }) {
     a[f.severity] = (a[f.severity] || 0) + 1;
     return a;
   }, {});
+
+  const fs = r.future_scope;
+  const hasFuture = !!fs && (!!fs.summary || (fs.opportunities?.length ?? 0) > 0 || (fs.headwinds?.length ?? 0) > 0);
+  const compCount = r.competitive_landscape.named_in_deck.length + r.competitive_landscape.discovered.length;
+  const flagSummary =
+    r.red_flags.length === 0
+      ? "No material red flags"
+      : (["critical", "high", "medium", "low"] as const)
+          .filter((k) => sevCounts[k])
+          .map((k) => `${sevCounts[k]} ${k}`)
+          .join(" · ");
+
+  const toggle = (id: string) => setOpenId((cur) => (cur === id ? null : id));
+  const jump = (id: string) => {
+    setOpenId(id);
+    setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  };
+
+  type Sec = { id: string; title: string; summary: string; body: React.ReactNode };
+  const sections: Sec[] = [];
+
+  if (hasScore && r.score) {
+    sections.push({
+      id: "score",
+      title: "Investment score & knowledge graph",
+      summary: `${r.score.overall}/100 · ${r.score.verdict}`,
+      body: (
+        <>
+          <div className="grid gap-6 lg:grid-cols-[auto_1fr]">
+            <div className="flex flex-col items-center gap-2 lg:w-44">
+              <ScoreGauge score={r.score.overall} />
+              <span className="chip bg-brand-50 text-brand-700">{r.score.verdict}</span>
+              {r.score.rationale && (
+                <p className="text-center text-[12px] leading-relaxed text-ink-500">{r.score.rationale}</p>
+              )}
+            </div>
+            <FactorBars factors={r.score.factors} />
+          </div>
+          <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Risk breakdown</p>
+          <RiskBreakdownView risk={r.score.risk} />
+          {r.score.graph.nodes.length > 0 && (
+            <>
+              <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Entity knowledge graph</p>
+              <p className="text-[12px] leading-relaxed text-ink-400">
+                The score isn&apos;t a flat average — it&apos;s computed over these links. Individual
+                founders roll up into the <span className="text-emerald-600">team</span>, which{" "}
+                <span className="text-emerald-600">supports</span> execution (traction), legitimacy and
+                founder–market fit; market demand pulls traction; traction justifies valuation; while
+                competitors and risks <span className="text-red-500">pressure</span> market &amp; legitimacy.
+              </p>
+              <KnowledgeGraphView graph={r.score.graph} />
+            </>
+          )}
+        </>
+      ),
+    });
+  }
+
+  sections.push({
+    id: "snapshot",
+    title: "Company snapshot",
+    summary: s.one_liner || `${s.deck_claims.length} claim(s) extracted`,
+    body:
+      s.deck_claims.length === 0 ? (
+        <p className="text-sm text-ink-400">No explicit claims extracted.</p>
+      ) : (
+        <ClaimList claims={s.deck_claims} />
+      ),
+  });
+
+  sections.push({
+    id: "team",
+    title: "Team analysis",
+    summary: r.team_assessment?.verdict || `${r.team_analysis.length} person/people analyzed`,
+    body: (
+      <>
+        <div className="space-y-4">
+          {r.team_analysis.map((m, i) => (
+            <TeamCard key={i} m={m} />
+          ))}
+        </div>
+        {r.team_assessment && <TeamWhole ta={r.team_assessment} />}
+        {r.team_analysis.length > 0 && <IcebreakerPanel deckId={deck.id} />}
+      </>
+    ),
+  });
+
+  sections.push({
+    id: "competition",
+    title: "Competitive landscape",
+    summary: compCount > 0 ? `${compCount} competitor(s) mapped` : "Differentiation check",
+    body: (
+      <>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {r.competitive_landscape.named_in_deck.map((c, i) => (
+            <CompetitorCard key={`n${i}`} c={c} tag="named in deck" tone="bg-brand-50 text-brand-700" />
+          ))}
+          {r.competitive_landscape.discovered.map((c, i) => (
+            <CompetitorCard key={`d${i}`} c={c} tag="discovered" tone="bg-sky-50 text-sky-700" />
+          ))}
+        </div>
+        {r.competitive_landscape.differentiation_assessment.length > 0 && (
+          <div className="pt-1">
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">Differentiation check</p>
+            <ClaimList claims={r.competitive_landscape.differentiation_assessment.slice(0, 3)} />
+          </div>
+        )}
+      </>
+    ),
+  });
+
+  sections.push({
+    id: "flags",
+    title: "Red flags",
+    summary: flagSummary,
+    body:
+      r.red_flags.length === 0 ? (
+        <p className="text-sm text-ink-400">No material red flags were surfaced.</p>
+      ) : (
+        <ul className="space-y-2.5">
+          {[...r.red_flags]
+            .sort((a, b) => sevRank(a.severity) - sevRank(b.severity))
+            .map((f, i) => {
+              const st = SEV_STYLE[f.severity];
+              return (
+                <li key={i} className={`rounded-xl border-l-2 bg-ink-50/40 py-2 pl-3 pr-3 ${st.accent}`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
+                    <span className={`text-[11px] font-bold uppercase tracking-wide ${st.text}`}>{f.severity}</span>
+                    <span className="text-sm font-semibold text-ink-900">{f.title}</span>
+                  </div>
+                  <p className="mt-1 text-[13.5px] leading-relaxed text-ink-700">
+                    {f.reasoning.claim}
+                    <ConfidenceMark c={f.reasoning.confidence} />
+                  </p>
+                </li>
+              );
+            })}
+        </ul>
+      ),
+  });
+
+  sections.push({
+    id: "diligence",
+    title: "Diligence questions",
+    summary: `${r.diligence_questions.length} question(s) to close gaps`,
+    body: (
+      <ol className="space-y-2">
+        {r.diligence_questions.map((q, i) => (
+          <li key={i} className="flex gap-3 rounded-xl border border-ink-100 px-4 py-3">
+            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-brand-50 text-xs font-bold text-brand-700">
+              {i + 1}
+            </span>
+            <div>
+              <p className="text-sm text-ink-800">{q.question}</p>
+              <p className="mt-1 text-xs text-ink-400">→ closes: {q.targets_gap}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    ),
+  });
+
+  sections.push({
+    id: "valuation",
+    title: "Valuation analysis",
+    summary: `Range ${r.valuation.range_low ?? "?"}–${r.valuation.range_high ?? "?"} · ask ${r.valuation.deck_ask ?? "—"}`,
+    body: (
+      <>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Stat label="Comp-derived range" value={`${r.valuation.range_low ?? "?"} – ${r.valuation.range_high ?? "?"}`} />
+          <Stat label="Deck ask" value={r.valuation.deck_ask ?? "—"} />
+          <Stat label="Multiples used" value={r.valuation.multiples_used ?? "—"} />
+        </div>
+        {r.valuation.comps.length > 0 && (
+          <div className="overflow-hidden rounded-xl border border-ink-100">
+            <table className="w-full text-sm">
+              <thead className="bg-ink-50 text-left text-xs uppercase text-ink-400">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Comp</th>
+                  <th className="px-4 py-2 font-medium">Detail</th>
+                  <th className="px-4 py-2 font-medium">Source</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {r.valuation.comps.map((c, i) => (
+                  <tr key={i}>
+                    <td className="px-4 py-2 font-medium text-ink-900">{c.company}</td>
+                    <td className="px-4 py-2 text-ink-600">{c.detail}</td>
+                    <td className="px-4 py-2 text-xs text-ink-400">{c.source.source_ref}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {r.valuation.assumptions.length > 0 && (
+          <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">Assumptions</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[13.5px] text-ink-700">
+              {r.valuation.assumptions.map((a, i) => (
+                <li key={i}>{a}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {r.valuation.ask_vs_comps.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">Ask vs. comps</p>
+            <ClaimList claims={r.valuation.ask_vs_comps} />
+          </div>
+        )}
+      </>
+    ),
+  });
+
+  if (hasFuture && fs) {
+    sections.push({
+      id: "future",
+      title: "Future scope",
+      summary: fs.summary || "Upside, opportunities and headwinds",
+      body: (
+        <>
+          {fs.summary && (
+            <p className="text-sm leading-relaxed text-ink-700">
+              {fs.summary}
+              {fs.time_horizon && <span className="ml-2 chip bg-ink-100 text-ink-500">horizon: {fs.time_horizon}</span>}
+            </p>
+          )}
+          {fs.opportunities?.length > 0 && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                Opportunities
+              </p>
+              <ClaimList claims={fs.opportunities} />
+            </div>
+          )}
+          {fs.headwinds?.length > 0 && (
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                Headwinds to the upside
+              </p>
+              <ClaimList claims={fs.headwinds} />
+            </div>
+          )}
+        </>
+      ),
+    });
+  }
+
+  sections.push({
+    id: "recommendation",
+    title: "Recommendation",
+    summary: `${meta.label} · Risk ${rec.risk_rating}`,
+    body: (
+      <>
+        <div className={`rounded-xl border px-4 py-4 ${meta.bg} ${meta.ring} ring-1`}>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-bold text-white ${meta.bar}`}>
+              {meta.label}
+            </span>
+            <span className="chip bg-white/70 text-ink-700">Risk: {rec.risk_rating}</span>
+            {rec.suggested_check_size && (
+              <span className="chip bg-white/70 text-ink-700">Check: {rec.suggested_check_size}</span>
+            )}
+          </div>
+          <p className="mt-3 text-sm text-ink-700">{rec.rationale}</p>
+        </div>
+        {rec.risk_factors.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">Named risk factors</p>
+            <ClaimList claims={rec.risk_factors} />
+          </div>
+        )}
+      </>
+    ),
+  });
+
+  if (hasDelivery && r.delivery) {
+    const d = r.delivery;
+    sections.push({
+      id: "delivery",
+      title: "Pitch delivery & Q&A",
+      summary: `From ${d.source || "transcript"}${d.qa.length ? ` · ${d.qa.length} Q&A` : ""}`,
+      body: (
+        <>
+          {d.source && <span className="chip bg-ink-100 text-ink-600">source: {d.source}</span>}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {d.clarity && <DeliveryCell label="Clarity" value={d.clarity} />}
+            {d.structure && <DeliveryCell label="Structure" value={d.structure} />}
+            {d.handling_of_questions && <DeliveryCell label="Handling of cross-questions" value={d.handling_of_questions} />}
+            {d.tone && <DeliveryCell label="Tone (from video)" value={d.tone} />}
+          </div>
+          {(d.strengths.length > 0 || d.weaknesses.length > 0) && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {d.strengths.length > 0 && (
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Delivery strengths</p>
+                  <ul className="mt-2 space-y-1 text-sm text-ink-700">
+                    {d.strengths.map((x, i) => (
+                      <li key={i}>• {x}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {d.weaknesses.length > 0 && (
+                <div className="rounded-xl border border-amber-100 bg-amber-50/50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Delivery weaknesses</p>
+                  <ul className="mt-2 space-y-1 text-sm text-ink-700">
+                    {d.weaknesses.map((x, i) => (
+                      <li key={i}>• {x}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          {d.qa.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">Questions &amp; answers</p>
+              {d.qa.map((q, i) => (
+                <div key={i} className="rounded-xl border border-ink-100 bg-white px-4 py-3">
+                  <p className="text-sm font-medium text-ink-900">Q. {q.question}</p>
+                  {q.answer && (
+                    <p className="mt-1 text-sm text-ink-600">
+                      <span className="font-medium text-ink-500">A.</span> {q.answer}
+                    </p>
+                  )}
+                  {q.assessment && (
+                    <p className="mt-2 text-xs leading-relaxed text-ink-500">
+                      {q.assessment}
+                      <ConfidenceMark c={q.confidence} />
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      ),
+    });
+  }
 
   return (
     <div className="space-y-6">
@@ -151,306 +494,64 @@ export default function ReportPage({ params }: { params: { id: string } }) {
         </div>
       )}
 
-      {/* Investment score + knowledge graph */}
-      {hasScore && r.score && (
-        <div id="score" className="card scroll-mt-24 p-6">
-          <h2 className="section-title">
-            <span className="grid h-7 w-7 place-items-center rounded-lg gradient-brand text-xs font-bold text-white">
-              ★
-            </span>
-            Investment score &amp; knowledge graph
-          </h2>
-
-          <div className="mt-4 grid gap-6 lg:grid-cols-[auto_1fr]">
-            <div className="flex flex-col items-center gap-2 lg:w-44">
-              <ScoreGauge score={r.score.overall} />
-              <span className="chip bg-brand-50 text-brand-700">{r.score.verdict}</span>
-              {r.score.rationale && (
-                <p className="text-center text-[12px] leading-relaxed text-ink-500">{r.score.rationale}</p>
-              )}
-            </div>
-            <FactorBars factors={r.score.factors} />
-          </div>
-
-          <p className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Risk breakdown</p>
-          <RiskBreakdownView risk={r.score.risk} />
-
-          {r.score.graph.nodes.length > 0 && (
-            <>
-              <p className="mt-6 mb-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
-                Entity knowledge graph
-              </p>
-              <p className="mb-2 text-[12px] leading-relaxed text-ink-400">
-                The score isn&apos;t a flat average — it&apos;s computed over these links. Individual
-                founders roll up into the <span className="text-emerald-600">team</span>, which{" "}
-                <span className="text-emerald-600">supports</span> execution (traction), legitimacy and
-                founder–market fit; market demand pulls traction; traction justifies valuation; while
-                competitors and risks <span className="text-red-500">pressure</span> market &amp; legitimacy.
-                Every link funnels into the company score, so the picture explains the number.
-              </p>
-              <KnowledgeGraphView graph={r.score.graph} />
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Two-column: sticky nav + content */}
-      <div className="grid gap-6 lg:grid-cols-[200px_1fr]">
+      {/* Sections — click a card to open it; only one stays open at a time */}
+      <div className="grid gap-6 lg:grid-cols-[210px_1fr]">
         <nav className="hidden lg:block print:hidden">
           <div className="sticky top-24 space-y-1">
-            {hasScore && (
-              <a href="#score" className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-brand-600 transition hover:bg-brand-50">
-                <span className="text-xs">★</span>
-                Score &amp; graph
-              </a>
-            )}
-            {NAV.map(([id, label], i) => (
-              <a key={id} href={`#${id}`} className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-ink-500 transition hover:bg-ink-50 hover:text-ink-900">
+            {sections.map((sec, i) => (
+              <button
+                key={sec.id}
+                onClick={() => jump(sec.id)}
+                className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm transition ${
+                  openId === sec.id
+                    ? "bg-brand-50 font-medium text-brand-700"
+                    : "text-ink-500 hover:bg-ink-50 hover:text-ink-900"
+                }`}
+              >
                 <span className="text-xs font-semibold text-ink-300">{i + 1}</span>
-                {label}
-              </a>
+                <span className="truncate">{sec.title}</span>
+              </button>
             ))}
-            {hasDelivery && (
-              <a href="#delivery" className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm text-ink-500 transition hover:bg-ink-50 hover:text-ink-900">
-                <span className="text-xs font-semibold text-ink-300">{NAV.length + 1}</span>
-                Pitch delivery
-              </a>
-            )}
           </div>
         </nav>
 
-        <div className="space-y-6">
-          <Section id="snapshot" n={1} title="Company snapshot">
-            {s.deck_claims.length === 0 ? (
-              <p className="text-sm text-ink-400">No explicit claims extracted.</p>
-            ) : (
-              <ClaimList claims={s.deck_claims} />
-            )}
-          </Section>
-
-          <Section id="team" n={2} title="Team analysis">
-            <div className="space-y-4">
-              {r.team_analysis.map((m, i) => (
-                <TeamCard key={i} m={m} />
-              ))}
-            </div>
-            {r.team_assessment && <TeamWhole ta={r.team_assessment} />}
-            {r.team_analysis.length > 0 && <IcebreakerPanel deckId={deck.id} />}
-          </Section>
-
-          <Section id="competition" n={3} title="Competitive landscape">
-            <div className="grid gap-2 sm:grid-cols-2">
-              {r.competitive_landscape.named_in_deck.map((c, i) => (
-                <CompetitorCard key={`n${i}`} c={c} tag="named in deck" tone="bg-brand-50 text-brand-700" />
-              ))}
-              {r.competitive_landscape.discovered.map((c, i) => (
-                <CompetitorCard key={`d${i}`} c={c} tag="discovered" tone="bg-sky-50 text-sky-700" />
-              ))}
-            </div>
-            {r.competitive_landscape.differentiation_assessment.length > 0 && (
-              <div className="pt-1">
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">Differentiation check</p>
-                <ClaimList claims={r.competitive_landscape.differentiation_assessment} />
-              </div>
-            )}
-          </Section>
-
-          <Section id="flags" n={4} title="Red flags">
-            {r.red_flags.length === 0 ? (
-              <p className="text-sm text-ink-400">No material red flags were surfaced.</p>
-            ) : (
-              <ul className="space-y-2.5">
-                {[...r.red_flags]
-                  .sort((a, b) => sevRank(a.severity) - sevRank(b.severity))
-                  .map((f, i) => {
-                    const st = SEV_STYLE[f.severity];
-                    return (
-                      <li key={i} className={`rounded-xl border-l-2 bg-ink-50/40 py-2 pl-3 pr-3 ${st.accent}`}>
-                        <div className="flex items-center gap-2">
-                          <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-                          <span className={`text-[11px] font-bold uppercase tracking-wide ${st.text}`}>{f.severity}</span>
-                          <span className="text-sm font-semibold text-ink-900">{f.title}</span>
-                        </div>
-                        <p className="mt-1 text-[13.5px] leading-relaxed text-ink-700">
-                          {f.reasoning.claim}
-                          <ConfidenceMark c={f.reasoning.confidence} />
-                        </p>
-                      </li>
-                    );
-                  })}
-              </ul>
-            )}
-          </Section>
-
-          <Section id="diligence" n={5} title="Suggested diligence questions">
-            <ol className="space-y-2">
-              {r.diligence_questions.map((q, i) => (
-                <li key={i} className="flex gap-3 rounded-xl border border-ink-100 px-4 py-3">
-                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-brand-50 text-xs font-bold text-brand-700">
+        <div className="space-y-3">
+          {sections.map((sec, i) => {
+            const open = openId === sec.id;
+            return (
+              <div key={sec.id} id={sec.id} className="card scroll-mt-24 overflow-hidden">
+                <button
+                  onClick={() => toggle(sec.id)}
+                  aria-expanded={open}
+                  className="flex w-full items-center gap-3 px-5 py-4 text-left transition hover:bg-ink-50/40"
+                >
+                  <span
+                    className={`grid h-7 w-7 shrink-0 place-items-center rounded-lg text-xs font-bold transition ${
+                      open ? "gradient-brand text-white" : "bg-ink-100 text-ink-500"
+                    }`}
+                  >
                     {i + 1}
                   </span>
-                  <div>
-                    <p className="text-sm text-ink-800">{q.question}</p>
-                    <p className="mt-1 text-xs text-ink-400">→ closes: {q.targets_gap}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </Section>
-
-          <Section id="valuation" n={6} title="Valuation analysis">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Stat label="Comp-derived range" value={`${r.valuation.range_low ?? "?"} – ${r.valuation.range_high ?? "?"}`} />
-              <Stat label="Deck ask" value={r.valuation.deck_ask ?? "—"} />
-              <Stat label="Multiples used" value={r.valuation.multiples_used ?? "—"} />
-            </div>
-            {r.valuation.comps.length > 0 && (
-              <div className="overflow-hidden rounded-xl border border-ink-100">
-                <table className="w-full text-sm">
-                  <thead className="bg-ink-50 text-left text-xs uppercase text-ink-400">
-                    <tr>
-                      <th className="px-4 py-2 font-medium">Comp</th>
-                      <th className="px-4 py-2 font-medium">Detail</th>
-                      <th className="px-4 py-2 font-medium">Source</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-ink-100">
-                    {r.valuation.comps.map((c, i) => (
-                      <tr key={i}>
-                        <td className="px-4 py-2 font-medium text-ink-900">{c.company}</td>
-                        <td className="px-4 py-2 text-ink-600">{c.detail}</td>
-                        <td className="px-4 py-2 text-xs text-ink-400">{c.source.source_ref}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-semibold text-ink-900">{sec.title}</span>
+                    {!open && sec.summary && (
+                      <span className="mt-0.5 block truncate text-xs text-ink-400">{sec.summary}</span>
+                    )}
+                  </span>
+                  <svg
+                    className={`h-4 w-4 shrink-0 text-ink-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
+                {open && <div className="space-y-4 border-t border-ink-100 px-5 py-4">{sec.body}</div>}
               </div>
-            )}
-            {r.valuation.assumptions.length > 0 && (
-              <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">Assumptions</p>
-                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[13.5px] text-ink-700">
-                  {r.valuation.assumptions.map((a, i) => (
-                    <li key={i}>{a}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {r.valuation.ask_vs_comps.length > 0 && (
-              <div>
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">Ask vs. comps</p>
-                <ClaimList claims={r.valuation.ask_vs_comps} />
-              </div>
-            )}
-          </Section>
-
-          {r.future_scope && (r.future_scope.summary || r.future_scope.opportunities?.length > 0 || r.future_scope.headwinds?.length > 0) && (
-            <Section id="future" n={7} title="Future scope">
-              {r.future_scope.summary && (
-                <p className="text-sm leading-relaxed text-ink-700">
-                  {r.future_scope.summary}
-                  {r.future_scope.time_horizon && (
-                    <span className="ml-2 chip bg-ink-100 text-ink-500">horizon: {r.future_scope.time_horizon}</span>
-                  )}
-                </p>
-              )}
-              {r.future_scope.opportunities?.length > 0 && (
-                <div>
-                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    Opportunities
-                  </p>
-                  <ClaimList claims={r.future_scope.opportunities} />
-                </div>
-              )}
-              {r.future_scope.headwinds?.length > 0 && (
-                <div>
-                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                    Headwinds to the upside
-                  </p>
-                  <ClaimList claims={r.future_scope.headwinds} />
-                </div>
-              )}
-            </Section>
-          )}
-
-          <Section id="recommendation" n={8} title="Recommendation">
-            <div className={`rounded-xl border px-4 py-4 ${meta.bg} ${meta.ring} ring-1`}>
-              <div className="flex flex-wrap items-center gap-3">
-                <span className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-bold text-white ${meta.bar}`}>
-                  {meta.label}
-                </span>
-                <span className="chip bg-white/70 text-ink-700">Risk: {rec.risk_rating}</span>
-                {rec.suggested_check_size && (
-                  <span className="chip bg-white/70 text-ink-700">Check: {rec.suggested_check_size}</span>
-                )}
-              </div>
-              <p className="mt-3 text-sm text-ink-700">{rec.rationale}</p>
-            </div>
-            {rec.risk_factors.length > 0 && (
-              <div>
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">Named risk factors</p>
-                <ClaimList claims={rec.risk_factors} />
-              </div>
-            )}
-          </Section>
-
-          {hasDelivery && r.delivery && (
-            <Section id="delivery" n={NAV.length + 1} title="Pitch delivery & Q&A">
-              {r.delivery.source && (
-                <span className="chip bg-ink-100 text-ink-600">source: {r.delivery.source}</span>
-              )}
-              <div className="grid gap-3 sm:grid-cols-2">
-                {r.delivery.clarity && <DeliveryCell label="Clarity" value={r.delivery.clarity} />}
-                {r.delivery.structure && <DeliveryCell label="Structure" value={r.delivery.structure} />}
-                {r.delivery.handling_of_questions && (
-                  <DeliveryCell label="Handling of cross-questions" value={r.delivery.handling_of_questions} />
-                )}
-                {r.delivery.tone && <DeliveryCell label="Tone (from video)" value={r.delivery.tone} />}
-              </div>
-
-              {(r.delivery.strengths.length > 0 || r.delivery.weaknesses.length > 0) && (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {r.delivery.strengths.length > 0 && (
-                    <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Delivery strengths</p>
-                      <ul className="mt-2 space-y-1 text-sm text-ink-700">
-                        {r.delivery.strengths.map((x, i) => <li key={i}>• {x}</li>)}
-                      </ul>
-                    </div>
-                  )}
-                  {r.delivery.weaknesses.length > 0 && (
-                    <div className="rounded-xl border border-amber-100 bg-amber-50/50 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Delivery weaknesses</p>
-                      <ul className="mt-2 space-y-1 text-sm text-ink-700">
-                        {r.delivery.weaknesses.map((x, i) => <li key={i}>• {x}</li>)}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {r.delivery.qa.length > 0 && (
-                <div className="space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">Questions &amp; answers</p>
-                  {r.delivery.qa.map((q, i) => (
-                    <div key={i} className="rounded-xl border border-ink-100 bg-white px-4 py-3">
-                      <p className="text-sm font-medium text-ink-900">Q. {q.question}</p>
-                      {q.answer && <p className="mt-1 text-sm text-ink-600"><span className="font-medium text-ink-500">A.</span> {q.answer}</p>}
-                      {q.assessment && (
-                        <p className="mt-2 text-xs leading-relaxed text-ink-500">
-                          {q.assessment}
-                          <ConfidenceMark c={q.confidence} />
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Section>
-          )}
-
+            );
+          })}
           <p className="rounded-2xl bg-ink-100/60 px-4 py-3 text-center text-xs text-ink-500">{r.analyst_note}</p>
         </div>
       </div>
@@ -635,7 +736,7 @@ function PointGroup({ label, dot, claims }: { label: string; dot: string; claims
         <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
         {label}
       </p>
-      <ClaimList claims={claims} />
+      <ClaimList claims={claims.slice(0, 3)} />
     </div>
   );
 }
@@ -684,7 +785,7 @@ function TeamCard({ m }: { m: TeamMember }) {
             {cr.assessment && <p className="mt-2.5 text-[13.5px] leading-relaxed text-ink-700">{cr.assessment}</p>}
             {(cr.notable_achievements?.length ?? 0) > 0 && (
               <div className="mt-2.5">
-                <ClaimList claims={cr.notable_achievements} />
+                <ClaimList claims={cr.notable_achievements.slice(0, 2)} />
               </div>
             )}
           </div>
