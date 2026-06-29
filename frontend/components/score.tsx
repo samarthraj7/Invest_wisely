@@ -88,12 +88,15 @@ export function RiskBreakdownView({ risk }: { risk: InvestmentScore["risk"] }) {
 }
 
 const NODE_COLOR: Record<string, string> = {
-  company: "#6366f1",
-  founder: "#10b981",
+  company: "#4f46e5",
+  team: "#10b981",
+  founder: "#34d399",
   market: "#0ea5e9",
   competitor: "#f59e0b",
   valuation: "#8b5cf6",
   traction: "#14b8a6",
+  legitimacy: "#6366f1",
+  delivery: "#ec4899",
   risk: "#ef4444",
 };
 
@@ -103,56 +106,122 @@ const EDGE_COLOR: Record<string, string> = {
   neutral: "#cbd5e1",
 };
 
+const PRIMARY = ["team", "market", "traction", "valuation", "legitimacy", "delivery"];
+
+type GNode = KnowledgeGraph["nodes"][number];
+type Pt = { x: number; y: number };
+
 export function KnowledgeGraphView({ graph }: { graph: KnowledgeGraph }) {
   if (!graph || graph.nodes.length === 0) return null;
-  const W = 680;
-  const H = 440;
+
+  const W = 760;
+  const H = 540;
   const cx = W / 2;
   const cy = H / 2;
-  const R = 168;
+  const R1 = 138; // pillar ring
+  const R2 = 232; // satellite ring
 
   const center = graph.nodes.find((n) => n.id === "company") ?? graph.nodes[0];
-  const others = graph.nodes.filter((n) => n.id !== center.id);
-  const pos: Record<string, { x: number; y: number }> = { [center.id]: { x: cx, y: cy } };
-  others.forEach((n, i) => {
-    const angle = (i / Math.max(1, others.length)) * 2 * Math.PI - Math.PI / 2;
-    pos[n.id] = { x: cx + R * Math.cos(angle), y: cy + R * Math.sin(angle) };
+  const primaries = graph.nodes.filter((n) => n.id !== center.id && PRIMARY.includes(n.type));
+  const secondaries = graph.nodes.filter((n) => n.id !== center.id && !PRIMARY.includes(n.type));
+
+  const pos: Record<string, Pt> = { [center.id]: { x: cx, y: cy } };
+  const angleOf: Record<string, number> = {};
+  primaries.forEach((n, i) => {
+    const a = (i / Math.max(1, primaries.length)) * 2 * Math.PI - Math.PI / 2;
+    angleOf[n.id] = a;
+    pos[n.id] = { x: cx + R1 * Math.cos(a), y: cy + R1 * Math.sin(a) };
   });
 
-  const nodeColor = (n: KnowledgeGraph["nodes"][number]) =>
+  // Each satellite (founder/competitor/risk) is anchored near the pillar it links to.
+  const anchorOf = (id: string): string => {
+    const out = graph.edges.find((e) => e.source === id);
+    if (out && angleOf[out.target] != null) return out.target;
+    const inc = graph.edges.find((e) => e.target === id);
+    if (inc && angleOf[inc.source] != null) return inc.source;
+    return center.id;
+  };
+  const groups: Record<string, GNode[]> = {};
+  secondaries.forEach((n) => {
+    const a = anchorOf(n.id);
+    (groups[a] ||= []).push(n);
+  });
+  Object.entries(groups).forEach(([anchor, list]) => {
+    const base = angleOf[anchor] ?? -Math.PI / 2;
+    const spread = Math.min(0.9, 0.32 * list.length);
+    list.forEach((n, i) => {
+      const off = list.length === 1 ? 0 : (i / (list.length - 1) - 0.5) * spread;
+      const a = base + off;
+      pos[n.id] = { x: cx + R2 * Math.cos(a), y: cy + R2 * Math.sin(a) };
+    });
+  });
+
+  const radOf = (n: GNode) =>
+    n.id === center.id ? 30 : n.type === "team" ? 24 : PRIMARY.includes(n.type) ? 19 : 11;
+  const nodeColor = (n: GNode) =>
     typeof n.score === "number" ? scoreHex(n.score) : NODE_COLOR[n.type] ?? "#94a3b8";
 
   return (
-    <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" style={{ minWidth: 520 }}>
+    <div className="overflow-x-auto rounded-2xl border border-ink-100 bg-gradient-to-b from-ink-50/60 to-white p-2">
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" style={{ minWidth: 560 }}>
+        <defs>
+          <marker id="arrow-support" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill={EDGE_COLOR.support} />
+          </marker>
+          <marker id="arrow-pressure" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill={EDGE_COLOR.pressure} />
+          </marker>
+          <radialGradient id="gcenter" cx="50%" cy="40%" r="65%">
+            <stop offset="0%" stopColor="#818cf8" />
+            <stop offset="100%" stopColor="#4f46e5" />
+          </radialGradient>
+        </defs>
+
         {graph.edges.map((e, i) => {
           const a = pos[e.source];
           const b = pos[e.target];
           if (!a || !b) return null;
-          const col = EDGE_COLOR[e.polarity ?? "neutral"] ?? "#cbd5e1";
-          const w = 1 + 2.5 * (e.weight ?? 0.4);
+          const pol = e.polarity ?? "neutral";
+          const col = EDGE_COLOR[pol] ?? "#cbd5e1";
+          const w = 1 + 2.8 * (e.weight ?? 0.4);
+          // bowed quadratic curve for a cleaner, less tangled look
+          const mx = (a.x + b.x) / 2;
+          const my = (a.y + b.y) / 2;
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const bow = 14;
+          const ctrl = { x: mx - (dy / len) * bow, y: my + (dx / len) * bow };
+          // trim endpoint so the arrow sits just outside the target node
+          const tnode = graph.nodes.find((n) => n.id === e.target)!;
+          const tr = radOf(tnode) + 5;
+          const vx = b.x - ctrl.x;
+          const vy = b.y - ctrl.y;
+          const vlen = Math.hypot(vx, vy) || 1;
+          const ex = b.x - (vx / vlen) * tr;
+          const ey = b.y - (vy / vlen) * tr;
           return (
-            <g key={i}>
-              <line
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
-                stroke={col}
-                strokeWidth={w}
-                strokeDasharray={e.polarity === "pressure" ? "4 3" : undefined}
-                opacity={0.75}
-              />
-            </g>
+            <path
+              key={i}
+              d={`M${a.x},${a.y} Q${ctrl.x},${ctrl.y} ${ex},${ey}`}
+              fill="none"
+              stroke={col}
+              strokeWidth={w}
+              strokeDasharray={pol === "pressure" ? "5 4" : undefined}
+              markerEnd={pol === "pressure" ? "url(#arrow-pressure)" : "url(#arrow-support)"}
+              opacity={0.7}
+            />
           );
         })}
+
         {graph.nodes.map((n) => {
           const p = pos[n.id];
           if (!p) return null;
           const isCenter = n.id === center.id;
-          const color = nodeColor(n);
-          const rad = isCenter ? 26 : typeof n.score === "number" ? 18 : 13;
+          const color = isCenter ? "url(#gcenter)" : nodeColor(n);
+          const rad = radOf(n);
           const scored = typeof n.score === "number";
+          const labelMax = isCenter ? 22 : PRIMARY.includes(n.type) ? 16 : 14;
           return (
             <g key={n.id}>
               <title>
@@ -160,9 +229,11 @@ export function KnowledgeGraphView({ graph }: { graph: KnowledgeGraph }) {
                   n.rationale ? `\n${n.rationale}` : ""
                 }`}
               </title>
-              <circle cx={p.x} cy={p.y} r={rad} fill={color} opacity={isCenter ? 1 : 0.92} />
+              {/* white halo for separation */}
+              <circle cx={p.x} cy={p.y} r={rad + 2.5} fill="#fff" />
+              <circle cx={p.x} cy={p.y} r={rad} fill={color} opacity={isCenter ? 1 : 0.95} />
               {scored && (
-                <text x={p.x} y={p.y + 4} textAnchor="middle" fill="#fff" style={{ fontSize: isCenter ? 15 : 12, fontWeight: 700 }}>
+                <text x={p.x} y={p.y + 4} textAnchor="middle" fill="#fff" style={{ fontSize: isCenter ? 16 : 12, fontWeight: 800 }}>
                   {n.score}
                 </text>
               )}
@@ -171,22 +242,29 @@ export function KnowledgeGraphView({ graph }: { graph: KnowledgeGraph }) {
                 y={p.y + rad + 13}
                 textAnchor="middle"
                 className={isCenter ? "fill-ink-900" : "fill-ink-600"}
-                style={{ fontSize: isCenter ? 13 : 11, fontWeight: isCenter ? 700 : 500 }}
+                style={{
+                  fontSize: isCenter ? 13 : PRIMARY.includes(n.type) ? 11 : 10,
+                  fontWeight: isCenter ? 700 : 500,
+                  paintOrder: "stroke",
+                  stroke: "#fff",
+                  strokeWidth: 3,
+                  strokeLinejoin: "round",
+                }}
               >
-                {n.label.length > 20 ? n.label.slice(0, 19) + "…" : n.label}
+                {n.label.length > labelMax ? n.label.slice(0, labelMax - 1) + "…" : n.label}
               </text>
             </g>
           );
         })}
       </svg>
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 px-2 pb-1">
         <span className="flex items-center gap-1.5 text-[11px] text-ink-400">
-          <span className="inline-block h-0.5 w-4" style={{ background: EDGE_COLOR.support }} /> supports
+          <span className="inline-block h-0.5 w-5 rounded" style={{ background: EDGE_COLOR.support }} /> supports →
         </span>
         <span className="flex items-center gap-1.5 text-[11px] text-ink-400">
-          <span className="inline-block h-0.5 w-4 border-t border-dashed" style={{ borderColor: EDGE_COLOR.pressure }} /> pressures
+          <span className="inline-block h-0.5 w-5 rounded border-t border-dashed" style={{ borderColor: EDGE_COLOR.pressure }} /> pressures →
         </span>
-        <span className="text-[11px] text-ink-300">· node color = score (red→green); ring size = weight</span>
+        <span className="text-[11px] text-ink-300">· node fill = score (red→green); size = weight; hover for detail</span>
       </div>
     </div>
   );

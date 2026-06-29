@@ -58,6 +58,19 @@ TEAM ANALYSIS (evaluate each person as a whole, not just one angle)
   well-cited papers outweigh many obscure ones; the same for patents (granted utility &
   central to the product vs. a trivial design patent).
 
+TEAM AS A WHOLE (after judging each person, judge the founding team as ONE unit)
+- team_assessment: do NOT just restate individuals. Assess how COMPLEMENTARY they are and
+  whether, COMBINED, they cover the functions a company at THIS stage needs (e.g. at
+  pre-seed/seed: someone who can build the product, someone who can sell/distribute, and
+  genuine domain insight). 
+    * rating: "strong" | "balanced" | "promising" | "incomplete" | "thin".
+    * verdict: one-line headline.
+    * summary: 2-4 sentences on combined strength + complementarity + stage fit.
+    * covered_skills: the key functions they credibly cover between them.
+    * missing_skills: important functions for this stage that look absent/thin (a solo
+      technical team with no commercial DNA is a real gap; say so).
+    * stage_fit: is this team composition right for where the company is now?
+
 MARKET & DIFFERENTIATION
 - Use the research to identify who the real, current competitors are (named in deck AND
   discovered), what those companies actually do today, and how this product differs.
@@ -68,6 +81,15 @@ VALUATION (judge whether the ask is reasonable)
 - Provide real comps (from research where possible), assumptions, multiples_used, and a range.
 - Explicitly assess whether the deck's ask is in line, rich, or cheap vs comps, and why.
 - Never present a single number as truth; show the reasoning.
+
+FUTURE SCOPE (where could this company realistically go?)
+- future_scope: the upside case, grounded in the deck + research — adjacent products,
+  new segments/geographies, platform/network effects, or expanding TAM. Be realistic,
+  not promotional.
+    * summary: 2-4 sentences on the realistic future potential.
+    * opportunities: concrete, sourced expansion paths.
+    * headwinds: what could CAP the scope (market limits, eroding moat, regulation, platform risk).
+    * time_horizon: rough horizon for the upside (e.g. "3-5 years").
 
 RECOMMENDATION (weigh many factors before concluding)
 - Synthesize across team, market/differentiation, product, traction, and valuation — not a
@@ -102,6 +124,8 @@ _SCHEMA_HINT = """Return ONE JSON object with EXACTLY these keys. A "claim" obje
                      researched_background:[claim], strengths:[claim],
                      founder_market_fit:[claim], gaps_vs_venture:[claim],
                      research_confidence:"high"|"medium"|"low"|"inconclusive"}],
+  "team_assessment": {rating:"strong"|"balanced"|"promising"|"incomplete"|"thin", verdict, summary,
+                      covered_skills:[str], missing_skills:[str], stage_fit},
   "competitive_landscape": {named_in_deck:[{name, relationship, note:claim}],
                             discovered:[{name, relationship, note:claim}],
                             differentiation_assessment:[claim]},
@@ -109,6 +133,7 @@ _SCHEMA_HINT = """Return ONE JSON object with EXACTLY these keys. A "claim" obje
   "diligence_questions": [{question, targets_gap}],
   "valuation": {comps:[{company, detail, source:claim}], assumptions:[str],
                 multiples_used, range_low, range_high, deck_ask, ask_vs_comps:[claim]},
+  "future_scope": {summary, opportunities:[claim], headwinds:[claim], time_horizon},
   "recommendation": {recommendation:"invest"|"pass"|"more_diligence", suggested_check_size,
                      risk_rating, risk_factors:[claim], rationale}
 }
@@ -303,6 +328,14 @@ def _mock_report(
             ],
         },
         "team_analysis": team_analysis,
+        "team_assessment": {
+            "rating": "",
+            "verdict": "",
+            "summary": "Automated team assessment did not run for this deck.",
+            "covered_skills": [],
+            "missing_skills": [],
+            "stage_fit": "",
+        },
         "competitive_landscape": {
             "named_in_deck": [
                 {
@@ -325,6 +358,12 @@ def _mock_report(
             "range_high": None,
             "deck_ask": company.get("ask"),
             "ask_vs_comps": [unavailable],
+        },
+        "future_scope": {
+            "summary": "Automated future-scope analysis did not run for this deck.",
+            "opportunities": [],
+            "headwinds": [],
+            "time_horizon": "",
         },
         "recommendation": {
             "recommendation": "more_diligence",

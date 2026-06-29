@@ -25,7 +25,10 @@ Return JSON with this shape:
               "stage": str|null, "location": str|null, "ask": str|null},
   "deck_claims": [{"claim": str, "page": int}],
   "market_claims": [{"claim": str, "page": int}],
-  "team": [{"name": str, "title": str|null, "linkedin_url": str|null, "page": int}],
+  "team": [{"name": str, "title": str|null, "linkedin_url": str|null, "page": int,
+            "keywords": str|null}],   // "keywords" = a few words the deck uses about this
+                                       // person (their stated expertise/prior employers/domain),
+                                       // used to find them online when no LinkedIn link is given
   "competitors_named": [str]
 }
 """

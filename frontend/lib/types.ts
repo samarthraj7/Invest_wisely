@@ -42,6 +42,22 @@ export interface TeamMember {
   research_confidence: Confidence;
 }
 
+export interface TeamAssessment {
+  rating: string;
+  verdict: string;
+  summary: string;
+  covered_skills: string[];
+  missing_skills: string[];
+  stage_fit: string;
+}
+
+export interface FutureScope {
+  summary: string;
+  opportunities: Claim[];
+  headwinds: Claim[];
+  time_horizon: string;
+}
+
 export interface Competitor {
   name: string;
   relationship: string;
@@ -170,6 +186,7 @@ export interface InvestmentReport {
   executive_summary?: string;
   company_snapshot: CompanySnapshot;
   team_analysis: TeamMember[];
+  team_assessment?: TeamAssessment;
   competitive_landscape: {
     named_in_deck: Competitor[];
     discovered: Competitor[];
@@ -178,6 +195,7 @@ export interface InvestmentReport {
   red_flags: RedFlag[];
   diligence_questions: DiligenceQuestion[];
   valuation: Valuation;
+  future_scope?: FutureScope;
   delivery?: PitchDelivery;
   score?: InvestmentScore;
   recommendation: Recommendation;

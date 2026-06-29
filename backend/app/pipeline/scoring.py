@@ -102,11 +102,15 @@ def _memo_digest(report: InvestmentReport) -> dict[str, Any]:
             "background": _claim_texts(m.researched_background, 3),
             "strengths": _claim_texts(m.strengths), "gaps": _claim_texts(m.gaps_vs_venture),
         })
+    ta = report.team_assessment
     return {
         "company": {"name": s.name, "one_liner": s.one_liner, "sector": s.sector,
                     "stage": s.stage, "ask": s.ask},
         "executive_summary": report.executive_summary,
         "team": team,
+        "team_assessment": {"rating": ta.rating, "verdict": ta.verdict,
+                            "covered_skills": ta.covered_skills, "missing_skills": ta.missing_skills,
+                            "stage_fit": ta.stage_fit},
         "differentiation": _claim_texts(report.competitive_landscape.differentiation_assessment),
         "valuation": {"range": f"{report.valuation.range_low} - {report.valuation.range_high}",
                       "deck_ask": report.valuation.deck_ask,
@@ -177,6 +181,16 @@ def compute_score(
         founder_scores.append((name, fsc, str(item.get("rationale") or "")))
     founder_avg = round(sum(s for _, s, _ in founder_scores) / len(founder_scores)) if founder_scores else 50
 
+    # Team-AS-A-WHOLE adjustment: a strong, complementary team lifts the founder
+    # pillar; missing core functions for the stage drag it down. This is what makes
+    # "the team" a node distinct from the average of individuals.
+    ta = report.team_assessment
+    rating_adj = {"strong": 6.0, "balanced": 3.0, "promising": 2.0,
+                  "incomplete": -5.0, "thin": -9.0}.get((ta.rating or "").strip().lower(), 0.0)
+    gap_adj = -3.0 * min(len(ta.missing_skills), 4)
+    team_adj = max(-15.0, min(10.0, rating_adj + gap_adj))
+    founder_eff = _clamp(founder_avg + team_adj)
+
     threats: list[tuple[str, int, str]] = []
     for i, name in enumerate(competitors):
         cin = (raw.get("competitors") or [])
@@ -195,12 +209,19 @@ def compute_score(
     delivery_base, delivery_rat = pillar("delivery") if include_delivery else (0, "")
 
     risk_pressure = min(30.0, sum(_SEV_PRESSURE.get(f.severity.value, 0.0) for f in report.red_flags))
-    founder_support = 0.15 * max(0, founder_avg - 60)
+    # The TEAM (as a whole) is the source of support that flows into the rest of
+    # the graph — strong, complete teams lift execution-dependent pillars.
+    founder_support = 0.15 * max(0, founder_eff - 60)
+    delivery_support = 0.10 * max(0, delivery_base - 60) if include_delivery else 0.0
 
     # ---- interlinked (effective) scores ----
-    market_eff = _clamp(market_base - 0.4 * (avg_threat - 50))
-    traction_eff = _clamp(traction_base + founder_support)
-    legit_eff = _clamp(legit_base + founder_support - risk_pressure)
+    # market is helped a bit by founder-market fit, hurt by competitor threat
+    market_eff = _clamp(market_base - 0.4 * (avg_threat - 50) + 0.10 * max(0, founder_eff - 60))
+    # traction is driven by team strength AND by market pull
+    traction_eff = _clamp(traction_base + founder_support + 0.10 * (market_eff - 50))
+    # legitimacy is lent by the team and clear delivery, dragged by risks
+    legit_eff = _clamp(legit_base + founder_support + delivery_support - risk_pressure)
+    # valuation must be justified by traction
     valuation_eff = _clamp(valuation_base + 0.20 * (traction_eff - 50))
     delivery_eff = delivery_base
 
@@ -217,7 +238,7 @@ def compute_score(
 
     # ---- weighted overall over present pillars ----
     pillars = {
-        "founders": (founder_avg, "Team & founders"),
+        "founders": (founder_eff, "Team & founders"),
         "market": (market_eff, "Market & differentiation"),
         "traction": (traction_eff, "Traction & revenue"),
         "valuation": (valuation_eff, "Valuation reasonableness"),
@@ -228,10 +249,12 @@ def compute_score(
     total_w = sum(_PILLAR_WEIGHTS[k] for k in pillars)
     overall = _clamp(sum(val * _PILLAR_WEIGHTS[k] for k, (val, _) in pillars.items()) / total_w)
 
+    team_rat = (ta.verdict or ta.summary or
+                (founder_scores[0][2] if founder_scores else "No founders were identified in the deck."))
     factors = [
-        ScoreFactor(key="founders", name="Team & founders", score=founder_avg,
+        ScoreFactor(key="founders", name="Team & founders", score=founder_eff,
                     weight=round(_PILLAR_WEIGHTS["founders"] / total_w, 3),
-                    rationale=(founder_scores[0][2] if founder_scores else "No founders were identified in the deck.")),
+                    rationale=team_rat + note(founder_avg, founder_eff, "for team composition")),
         ScoreFactor(key="market", name="Market & differentiation", score=market_eff,
                     weight=round(_PILLAR_WEIGHTS["market"] / total_w, 3),
                     rationale=market_rat + note(market_base, market_eff, "for competitor pressure")),
@@ -250,8 +273,8 @@ def compute_score(
                                     weight=round(_PILLAR_WEIGHTS["delivery"] / total_w, 3),
                                     rationale=delivery_rat))
 
-    graph = _scored_graph(report, overall, founder_scores, market_eff, market_rat,
-                          traction_eff, valuation_eff, legit_eff,
+    graph = _scored_graph(report, overall, founder_scores, founder_eff, team_rat,
+                          market_eff, market_rat, traction_eff, valuation_eff, legit_eff,
                           delivery_eff if include_delivery else None, threats)
 
     risk_in = raw.get("risk") or {}
@@ -272,8 +295,16 @@ def compute_score(
     return score
 
 
-def _scored_graph(report, overall, founder_scores, market_eff, market_rat,
+def _scored_graph(report, overall, founder_scores, founder_eff, team_rat, market_eff, market_rat,
                   traction_eff, valuation_eff, legit_eff, delivery_eff, threats) -> KnowledgeGraph:
+    """Build the entity graph that the overall score was computed over.
+
+    The links are the actual correlations used in the math: individual founders
+    roll up into a TEAM node; the team supports execution-dependent pillars
+    (traction, legitimacy) and founder-market fit (market); traction justifies
+    valuation; competitors & risks apply pressure. Everything funnels into the
+    company score, so the picture explains the number.
+    """
     s = report.company_snapshot
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
@@ -282,59 +313,63 @@ def _scored_graph(report, overall, founder_scores, market_eff, market_rat,
         nodes.append(GraphNode(id=nid, label=(label or "")[:60], type=ntype, score=score,
                                weight=weight, rationale=rationale[:200], detail=detail[:140]))
 
+    def e(src, tgt, rel, polarity, weight):
+        edges.append(GraphEdge(source=src, target=tgt, relation=rel,
+                               polarity=polarity, weight=round(weight, 2)))
+
     n("company", s.name or "This company", "company", score=overall, weight=1.0,
       rationale="Weighted blend of the linked pillars below.", detail=s.one_liner)
 
+    # --- Team (as a whole) aggregates the individual founders ---
+    ta = report.team_assessment
+    team_detail = ta.rating or (f"{len(founder_scores)} founder(s)" if founder_scores else "")
+    n("team", "Founding team", "team", score=founder_eff,
+      weight=_PILLAR_WEIGHTS["founders"], rationale=team_rat, detail=team_detail)
+    e("team", "company", "builds", "support", 0.8)
+    e("team", "traction", "executes", "support", 0.4)
+    e("team", "legitimacy", "lends credibility", "support", 0.4)
+    e("team", "market", "founder-market fit", "support", 0.3)
+
     for i, (name, sc, rat) in enumerate(founder_scores):
         fid = f"founder{i}"
-        n(fid, name, "founder", score=sc, weight=_PILLAR_WEIGHTS["founders"], rationale=rat)
-        edges.append(GraphEdge(source=fid, target="company", relation="founder of",
-                               polarity="support", weight=round(sc / 100, 2)))
-        edges.append(GraphEdge(source=fid, target="traction", relation="drives",
-                               polarity="support", weight=0.3))
-        edges.append(GraphEdge(source=fid, target="legitimacy", relation="lends credibility",
-                               polarity="support", weight=0.3))
+        n(fid, name, "founder", score=sc, weight=round(_PILLAR_WEIGHTS["founders"] / max(1, len(founder_scores)), 3),
+          rationale=rat)
+        e(fid, "team", "part of", "support", round(sc / 100, 2))
 
     n("market", s.sector or "Market", "market", score=market_eff,
       weight=_PILLAR_WEIGHTS["market"], rationale=market_rat)
-    edges.append(GraphEdge(source="market", target="company", relation="opportunity for",
-                           polarity="support", weight=0.6))
+    e("market", "company", "opportunity for", "support", 0.6)
+    e("market", "traction", "demand pulls", "support", 0.3)
 
     n("traction", "Traction & revenue", "traction", score=traction_eff,
-      weight=_PILLAR_WEIGHTS["traction"], rationale="")
-    edges.append(GraphEdge(source="traction", target="company", relation="proves",
-                           polarity="support", weight=0.6))
-    edges.append(GraphEdge(source="traction", target="valuation", relation="justifies",
-                           polarity="support", weight=0.6))
+      weight=_PILLAR_WEIGHTS["traction"], rationale="Driven by team execution and market pull.")
+    e("traction", "company", "proves", "support", 0.6)
+    e("traction", "valuation", "justifies", "support", 0.6)
 
     n("valuation", s.ask or report.valuation.deck_ask or "Valuation / ask", "valuation",
-      score=valuation_eff, weight=_PILLAR_WEIGHTS["valuation"], rationale="")
-    edges.append(GraphEdge(source="valuation", target="company", relation="priced at",
-                           polarity="support", weight=0.5))
+      score=valuation_eff, weight=_PILLAR_WEIGHTS["valuation"], rationale="Must be supported by traction.")
+    e("valuation", "company", "priced at", "support", 0.5)
 
     n("legitimacy", "Legitimacy", "legitimacy", score=legit_eff,
-      weight=_PILLAR_WEIGHTS["legitimacy"], rationale="")
-    edges.append(GraphEdge(source="legitimacy", target="company", relation="grounds",
-                           polarity="support", weight=0.7))
+      weight=_PILLAR_WEIGHTS["legitimacy"], rationale="Lent by the team & clear delivery, dragged by risks.")
+    e("legitimacy", "company", "grounds", "support", 0.7)
 
     if delivery_eff is not None:
         n("delivery", "Pitch delivery", "delivery", score=delivery_eff,
           weight=_PILLAR_WEIGHTS["delivery"], rationale="")
-        edges.append(GraphEdge(source="delivery", target="company", relation="communicated by",
-                               polarity="support", weight=0.4))
+        e("delivery", "company", "communicated by", "support", 0.4)
+        e("delivery", "legitimacy", "reinforces", "support", 0.3)
 
     for i, (name, threat, rat) in enumerate(threats[:5]):
         cid = f"comp{i}"
         n(cid, name, "competitor", score=None, rationale=rat, detail=f"threat {threat}/100")
-        edges.append(GraphEdge(source=cid, target="market", relation="competes",
-                               polarity="pressure", weight=round(threat / 100, 2)))
+        e(cid, "market", "competes", "pressure", round(threat / 100, 2))
 
     for i, f in enumerate([f for f in report.red_flags
                            if f.severity.value in ("critical", "high")][:3]):
         rid = f"risk{i}"
         n(rid, f.title, "risk", score=None, detail=f.severity.value)
-        edges.append(GraphEdge(source=rid, target="legitimacy", relation="risk",
-                               polarity="pressure", weight=0.9 if f.severity.value == "critical" else 0.6))
+        e(rid, "legitimacy", "risk", "pressure", 0.9 if f.severity.value == "critical" else 0.6)
 
     return KnowledgeGraph(nodes=nodes, edges=edges)
 

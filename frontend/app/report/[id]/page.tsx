@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { exportUrl, findIcebreakers, getDeck } from "@/lib/api";
 import type { ExportFormat } from "@/lib/api";
 import type { DeckDetail } from "@/lib/types";
-import type { Claim, IcebreakerSet, TeamMember } from "@/lib/types";
+import type { Claim, IcebreakerSet, TeamAssessment, TeamMember } from "@/lib/types";
 import { Banner, ClaimList, ConfidenceBadge, ConfidenceMark, recMeta, Section, SEV_STYLE } from "@/components/ui";
 import { FactorBars, KnowledgeGraphView, RiskBreakdownView, ScoreGauge } from "@/components/score";
 
@@ -16,6 +16,7 @@ const NAV = [
   ["flags", "Red flags"],
   ["diligence", "Diligence questions"],
   ["valuation", "Valuation"],
+  ["future", "Future scope"],
   ["recommendation", "Recommendation"],
 ] as const;
 
@@ -180,11 +181,12 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                 Entity knowledge graph
               </p>
               <p className="mb-2 text-[12px] leading-relaxed text-ink-400">
-                The score isn&apos;t a flat average — nodes influence each other along the links:
-                strong founders <span className="text-emerald-600">support</span> traction &amp; legitimacy,
-                traction justifies valuation, while competitors and risks{" "}
-                <span className="text-red-500">pressure</span> market &amp; legitimacy. The company score is
-                the weighted blend of these interlinked pillars.
+                The score isn&apos;t a flat average — it&apos;s computed over these links. Individual
+                founders roll up into the <span className="text-emerald-600">team</span>, which{" "}
+                <span className="text-emerald-600">supports</span> execution (traction), legitimacy and
+                founder–market fit; market demand pulls traction; traction justifies valuation; while
+                competitors and risks <span className="text-red-500">pressure</span> market &amp; legitimacy.
+                Every link funnels into the company score, so the picture explains the number.
               </p>
               <KnowledgeGraphView graph={r.score.graph} />
             </>
@@ -232,6 +234,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                 <TeamCard key={i} m={m} />
               ))}
             </div>
+            {r.team_assessment && <TeamWhole ta={r.team_assessment} />}
             {r.team_analysis.length > 0 && <IcebreakerPanel deckId={deck.id} />}
           </Section>
 
@@ -341,7 +344,38 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             )}
           </Section>
 
-          <Section id="recommendation" n={7} title="Recommendation">
+          {r.future_scope && (r.future_scope.summary || r.future_scope.opportunities?.length > 0 || r.future_scope.headwinds?.length > 0) && (
+            <Section id="future" n={7} title="Future scope">
+              {r.future_scope.summary && (
+                <p className="text-sm leading-relaxed text-ink-700">
+                  {r.future_scope.summary}
+                  {r.future_scope.time_horizon && (
+                    <span className="ml-2 chip bg-ink-100 text-ink-500">horizon: {r.future_scope.time_horizon}</span>
+                  )}
+                </p>
+              )}
+              {r.future_scope.opportunities?.length > 0 && (
+                <div>
+                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    Opportunities
+                  </p>
+                  <ClaimList claims={r.future_scope.opportunities} />
+                </div>
+              )}
+              {r.future_scope.headwinds?.length > 0 && (
+                <div>
+                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                    Headwinds to the upside
+                  </p>
+                  <ClaimList claims={r.future_scope.headwinds} />
+                </div>
+              )}
+            </Section>
+          )}
+
+          <Section id="recommendation" n={8} title="Recommendation">
             <div className={`rounded-xl border px-4 py-4 ${meta.bg} ${meta.ring} ring-1`}>
               <div className="flex flex-wrap items-center gap-3">
                 <span className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-bold text-white ${meta.bar}`}>
@@ -669,6 +703,57 @@ function TeamCard({ m }: { m: TeamMember }) {
             <p className="text-sm text-ink-400">No public background was found for this person.</p>
           )}
       </div>
+    </div>
+  );
+}
+
+function ratingTone(r: string): string {
+  const v = (r || "").toLowerCase();
+  if (v === "strong") return "bg-emerald-100 text-emerald-700";
+  if (v === "balanced" || v === "promising") return "bg-brand-100 text-brand-700";
+  if (v === "incomplete" || v === "thin") return "bg-amber-100 text-amber-700";
+  return "bg-ink-100 text-ink-600";
+}
+
+function TeamWhole({ ta }: { ta: TeamAssessment }) {
+  if (!ta.summary && !ta.verdict && (ta.covered_skills?.length ?? 0) === 0 && (ta.missing_skills?.length ?? 0) === 0)
+    return null;
+  return (
+    <div className="rounded-2xl border border-brand-100 bg-brand-50/30 px-4 py-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm font-semibold text-ink-900">Team as a whole</p>
+        {ta.rating && <span className={`chip ${ratingTone(ta.rating)}`}>{ta.rating}</span>}
+      </div>
+      {ta.verdict && <p className="mt-1.5 text-[14px] font-medium text-ink-800">{ta.verdict}</p>}
+      {ta.summary && <p className="mt-1 text-[13.5px] leading-relaxed text-ink-700">{ta.summary}</p>}
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        {ta.covered_skills?.length > 0 && (
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-600">Covers</p>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {ta.covered_skills.map((x, i) => (
+                <span key={i} className="chip bg-emerald-50 text-emerald-700">{x}</span>
+              ))}
+            </div>
+          </div>
+        )}
+        {ta.missing_skills?.length > 0 && (
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-600">Missing / thin</p>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {ta.missing_skills.map((x, i) => (
+                <span key={i} className="chip bg-amber-50 text-amber-700">{x}</span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      {ta.stage_fit && (
+        <p className="mt-3 text-[13px] text-ink-600">
+          <span className="font-medium text-ink-500">Stage fit: </span>
+          {ta.stage_fit}
+        </p>
+      )}
     </div>
   );
 }

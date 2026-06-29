@@ -11,6 +11,7 @@ from typing import Any
 from ..clients import cache
 from ..clients.enrichment import get_enrichment
 from ..clients.search import get_search
+from ..obs import logger
 from .entities import Entities, Person
 
 # Cost guards: bound how much external research a single deck can trigger.
@@ -19,6 +20,55 @@ from .entities import Entities, Person
 MAX_PEOPLE = 6
 MAX_COMPETITORS = 4
 RESULTS_PER_QUERY = 3
+
+
+def _is_real(results: list[dict[str, Any]]) -> bool:
+    """True if a search returned at least one genuine (non-mock) hit."""
+    for r in results or []:
+        url = (r.get("url") or "")
+        if url and "example.com/mock" not in url and "mock" not in url.lower():
+            return True
+    return False
+
+
+def _find_person_on_web(search, person: Person, company: str) -> tuple[list[dict[str, Any]], str]:
+    """Locate a person via a fallback CASCADE when the deck gives no LinkedIn URL.
+
+    The deck often lists a founder with just a name + role. We escalate through
+    progressively looser queries and stop at the first that returns real hits:
+
+      1) "<name>" "<company>"                          (most precise)
+      2) <company> team / people <name>                (find via the company site)
+      3) <name> <deck keywords about them>             (last resort, by expertise)
+
+    When the deck DOES give a LinkedIn URL we just run the rich background query.
+    """
+    name = person.name
+    title = person.title or ""
+
+    if person.linkedin_url:
+        q = f"{name} {title} {company} background work history".strip()
+        return search.search(q, num_results=RESULTS_PER_QUERY), q
+
+    attempts = [
+        (f'"{name}" "{company}"', "name+company"),
+        (f"{company} team people {name} {title}".strip(), "company-people"),
+    ]
+    if person.keywords:
+        attempts.append((f"{name} {person.keywords}", "name+deck-keywords"))
+    # Always keep a generic background query as the final net.
+    attempts.append((f"{name} {title} {company} background work history".strip(), "background"))
+
+    best: list[dict[str, Any]] = []
+    for q, tag in attempts:
+        res = search.search(q, num_results=RESULTS_PER_QUERY)
+        if not best:
+            best = res
+        if _is_real(res):
+            logger.info("[research] person '%s' located via %s query", name, tag)
+            return res, q
+    logger.info("[research] person '%s' not confidently located after %d queries", name, len(attempts))
+    return best, attempts[0][0]
 
 
 def research_person(person: Person, company: str) -> dict[str, Any]:
@@ -31,8 +81,7 @@ def research_person(person: Person, company: str) -> dict[str, Any]:
     search = get_search()
     enrich = get_enrichment()
 
-    query = f"{person.name} {person.title or ''} {company} background work history".strip()
-    web = search.search(query, num_results=RESULTS_PER_QUERY)
+    web, query = _find_person_on_web(search, person, company)
     # Dedicated credential signals: research output and patents. These let the
     # analysis judge not just IF someone is credentialed but how substantively.
     papers = search.search(

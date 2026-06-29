@@ -100,6 +100,18 @@ _TEMPLATE = Template(
  {% for c in m.gaps_vs_venture %}{{ claim(c) }}{% endfor %}{% endif %}
 {% endfor %}
 
+{% set ta = r.team_assessment %}
+{% if ta and (ta.summary or ta.verdict or ta.covered_skills or ta.missing_skills) %}
+<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;margin-top:10px;background:#fafafa">
+ <b style="font-size:13px">Team as a whole{% if ta.rating %} — {{ ta.rating }}{% endif %}</b>
+ {% if ta.verdict %}<div style="font-size:13px;margin-top:2px">{{ ta.verdict }}</div>{% endif %}
+ {% if ta.summary %}<p style="font-size:13px;margin:6px 0">{{ ta.summary }}</p>{% endif %}
+ {% if ta.covered_skills %}<div class="src"><b>Covers:</b> {{ ta.covered_skills|join(', ') }}</div>{% endif %}
+ {% if ta.missing_skills %}<div class="src"><b>Missing/thin:</b> {{ ta.missing_skills|join(', ') }}</div>{% endif %}
+ {% if ta.stage_fit %}<div class="src"><b>Stage fit:</b> {{ ta.stage_fit }}</div>{% endif %}
+</div>
+{% endif %}
+
 <h2>3 · Competitive landscape</h2>
 {% for c in r.competitive_landscape.named_in_deck %}{{ claim(c.note) }}{% endfor %}
 {% for c in r.competitive_landscape.discovered %}{{ claim(c.note) }}{% endfor %}
@@ -127,7 +139,15 @@ _TEMPLATE = Template(
 <ul>{% for a in r.valuation.assumptions %}<li>{{ a }}</li>{% endfor %}</ul>
 {% for c in r.valuation.ask_vs_comps %}{{ claim(c) }}{% endfor %}
 
-<h2>7 · Recommendation</h2>
+{% set fs = r.future_scope %}
+{% if fs and (fs.summary or fs.opportunities or fs.headwinds) %}
+<h2>7 · Future scope</h2>
+{% if fs.summary %}<p>{{ fs.summary }}{% if fs.time_horizon %} <span class="conf">horizon: {{ fs.time_horizon }}</span>{% endif %}</p>{% endif %}
+{% if fs.opportunities %}<p class="muted"><b>Opportunities</b></p>{% for c in fs.opportunities %}{{ claim(c) }}{% endfor %}{% endif %}
+{% if fs.headwinds %}<p class="muted"><b>Headwinds</b></p>{% for c in fs.headwinds %}{{ claim(c) }}{% endfor %}{% endif %}
+{% endif %}
+
+<h2>8 · Recommendation</h2>
 <p class="rec">{{ r.recommendation.recommendation.value|upper }}
  <span class="pill" style="background:#fee2e2;color:#991b1b">Risk: {{ r.recommendation.risk_rating }}</span></p>
 <p>{{ r.recommendation.rationale }}</p>
@@ -137,7 +157,7 @@ _TEMPLATE = Template(
 {% for c in r.recommendation.risk_factors %}{{ claim(c) }}{% endfor %}
 
 {% if r.delivery and r.delivery.available %}
-<h2>8 · Pitch delivery {% if r.delivery.source %}<span class="conf">({{ r.delivery.source }})</span>{% endif %}</h2>
+<h2>9 · Pitch delivery {% if r.delivery.source %}<span class="conf">({{ r.delivery.source }})</span>{% endif %}</h2>
 {% if r.delivery.clarity %}<p><b>Clarity:</b> {{ r.delivery.clarity }}</p>{% endif %}
 {% if r.delivery.structure %}<p><b>Structure:</b> {{ r.delivery.structure }}</p>{% endif %}
 {% if r.delivery.handling_of_questions %}<p><b>Handling of cross-questions:</b> {{ r.delivery.handling_of_questions }}</p>{% endif %}
@@ -278,6 +298,21 @@ def _export_docx(report: InvestmentReport, out_path: Path) -> tuple[Path, str]:
                 for c in claims:
                     claim_p(c)
 
+    ta = r.team_assessment
+    if ta and (ta.summary or ta.verdict or ta.covered_skills or ta.missing_skills):
+        head = "Team as a whole" + (f" — {ta.rating}" if ta.rating else "")
+        doc.add_heading(head, level=2)
+        if ta.verdict:
+            doc.add_paragraph(ta.verdict).runs[0].bold = True
+        if ta.summary:
+            doc.add_paragraph(ta.summary)
+        if ta.covered_skills:
+            doc.add_paragraph("Covers: " + ", ".join(ta.covered_skills))
+        if ta.missing_skills:
+            doc.add_paragraph("Missing/thin: " + ", ".join(ta.missing_skills))
+        if ta.stage_fit:
+            doc.add_paragraph("Stage fit: " + ta.stage_fit)
+
     doc.add_heading("3 · Competitive landscape", level=1)
     for c in r.competitive_landscape.named_in_deck + r.competitive_landscape.discovered:
         doc.add_paragraph(f"{c.name} ({c.relationship})")
@@ -306,7 +341,21 @@ def _export_docx(report: InvestmentReport, out_path: Path) -> tuple[Path, str]:
     for c in r.valuation.ask_vs_comps:
         claim_p(c)
 
-    doc.add_heading("7 · Recommendation", level=1)
+    fs = r.future_scope
+    if fs and (fs.summary or fs.opportunities or fs.headwinds):
+        doc.add_heading("7 · Future scope", level=1)
+        if fs.summary:
+            doc.add_paragraph(fs.summary + (f"  (horizon: {fs.time_horizon})" if fs.time_horizon else ""))
+        if fs.opportunities:
+            doc.add_paragraph("Opportunities").runs[0].bold = True
+            for c in fs.opportunities:
+                claim_p(c)
+        if fs.headwinds:
+            doc.add_paragraph("Headwinds").runs[0].bold = True
+            for c in fs.headwinds:
+                claim_p(c)
+
+    doc.add_heading("8 · Recommendation", level=1)
     rec = r.recommendation
     doc.add_paragraph(f"{rec.recommendation.value.upper()}  ·  Risk: {rec.risk_rating}")
     if rec.suggested_check_size:
@@ -317,7 +366,7 @@ def _export_docx(report: InvestmentReport, out_path: Path) -> tuple[Path, str]:
 
     d = r.delivery
     if d and d.available:
-        doc.add_heading(f"8 · Pitch delivery ({d.source})", level=1)
+        doc.add_heading(f"9 · Pitch delivery ({d.source})", level=1)
         for label, val in (
             ("Clarity", d.clarity),
             ("Structure", d.structure),

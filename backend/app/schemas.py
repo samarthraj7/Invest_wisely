@@ -141,6 +141,51 @@ class TeamMemberAnalysis(_SafeModel):
     research_confidence: Confidence = Confidence.inconclusive
 
 
+class TeamAssessment(_SafeModel):
+    """The founding team judged AS A UNIT (not one person at a time): how strong
+    they are together and whether they cover the skills a company at THIS stage
+    needs (e.g. seed: a builder + a seller + domain insight)."""
+    rating: str = Field(
+        default="",
+        description='One word/phrase: "strong" | "balanced" | "promising" | "incomplete" | "thin".',
+    )
+    verdict: str = Field(default="", description="One-line headline read of the team as a whole.")
+    summary: str = Field(
+        default="",
+        description="2-4 sentences: how complementary they are, combined strength, "
+        "and whether the makeup fits the company's stage.",
+    )
+    covered_skills: List[str] = Field(
+        default_factory=list, description="Key skills/functions the team credibly covers."
+    )
+    missing_skills: List[str] = Field(
+        default_factory=list,
+        description="Important skills/functions for this stage that appear missing or thin.",
+    )
+    stage_fit: str = Field(
+        default="",
+        description="How well the team composition matches what's needed at the company's current stage.",
+    )
+
+
+class FutureScope(_SafeModel):
+    """Where this company could go — the upside case and what gates it."""
+    summary: str = Field(
+        default="", description="2-4 sentence narrative of the realistic future potential."
+    )
+    opportunities: List[Claim] = Field(
+        default_factory=list,
+        description="Concrete expansion paths: adjacent products, markets, segments, platform plays.",
+    )
+    headwinds: List[Claim] = Field(
+        default_factory=list,
+        description="What could cap the scope: market limits, moats eroding, regulation, dependencies.",
+    )
+    time_horizon: str = Field(
+        default="", description="Rough horizon for the upside to materialize (e.g. '3-5 years')."
+    )
+
+
 class Competitor(_SafeModel):
     name: str = ""
     relationship: str = Field(default="", description="e.g. direct, adjacent, incumbent")
@@ -305,10 +350,12 @@ class InvestmentReport(_SafeModel):
     )
     company_snapshot: CompanySnapshot
     team_analysis: List[TeamMemberAnalysis] = Field(default_factory=list)
+    team_assessment: TeamAssessment = Field(default_factory=TeamAssessment)
     competitive_landscape: CompetitiveLandscape
     red_flags: List[RedFlag] = Field(default_factory=list)
     diligence_questions: List[DiligenceQuestion] = Field(default_factory=list)
     valuation: ValuationAnalysis
+    future_scope: FutureScope = Field(default_factory=FutureScope)
     delivery: PitchDelivery = Field(default_factory=PitchDelivery)
     score: InvestmentScore = Field(default_factory=InvestmentScore)
     recommendation: FinalRecommendation

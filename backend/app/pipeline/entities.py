@@ -15,6 +15,9 @@ class Person:
     title: Optional[str] = None
     linkedin_url: Optional[str] = None
     deck_page: Optional[int] = None
+    # A few words the deck uses about this person (expertise / prior employers /
+    # domain). Used as a last-resort search signal when no LinkedIn link is given.
+    keywords: Optional[str] = None
 
 
 @dataclass
@@ -51,6 +54,7 @@ def extract_entities(understanding: dict[str, Any]) -> Entities:
                 title=raw.get("title"),
                 linkedin_url=raw.get("linkedin_url"),
                 deck_page=raw.get("page"),
+                keywords=raw.get("keywords") or raw.get("bio") or raw.get("description"),
             )
         )
     return ents
